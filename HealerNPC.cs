@@ -40,40 +40,38 @@ public class HealerNPC : MonoBehaviour
 
     void TryToHeal()
     {
-        // KROK 1: SprawdŸ czy gracz w ogóle potrzebuje leczenia
-        if (playerStats.currentHP >= playerStats.maxHP)
+        if (playerStats.team.Count == 0) return;
+
+        // KROK 1: SprawdŸ czy jakikolwiek z 6 stworków wymaga leczenia
+        bool needsHealing = false;
+        foreach (Pokezaur poke in playerStats.team)
         {
-            DialogueManager.instance.StartDialogue(npcName, fullHpLines);
-            return; // Koñczymy funkcjê, nie zabieramy kasy
+            if (poke.currentHP < poke.maxHP) needsHealing = true;
         }
 
-        // KROK 2: Próba zakupu (SpendGold zwraca true jeœli siê uda, false jeœli nie)
+        if (!needsHealing)
+        {
+            DialogueManager.instance.StartDialogue(npcName, fullHpLines);
+            return;
+        }
+
+        // KROK 2: Próba zakupu
         if (playerStats.SpendGold(healCost))
         {
             // --- SUKCES (Mamy kasê) ---
-
-            // Logika leczenia
-            playerStats.currentHP = playerStats.maxHP;
-
-            // DŸwiêk
-            if (healSound != null && AudioManager.instance != null)
+            // Leczymy CA£¥ DRU¯YNÊ
+            foreach (Pokezaur poke in playerStats.team)
             {
-                AudioManager.instance.PlaySFX(healSound);
+                poke.currentHP = poke.maxHP;
             }
 
-            // Dialog sukcesu
+            if (healSound != null && AudioManager.instance != null) AudioManager.instance.PlaySFX(healSound);
             DialogueManager.instance.StartDialogue(npcName, successLines);
         }
         else
         {
             // --- PORA¯KA (Brak kasy) ---
-            // Opcjonalny dŸwiêk b³êdu
-            if (errorSound != null && AudioManager.instance != null)
-            {
-                AudioManager.instance.PlaySFX(errorSound);
-            }
-
-            // Dialog biedy
+            if (errorSound != null && AudioManager.instance != null) AudioManager.instance.PlaySFX(errorSound);
             DialogueManager.instance.StartDialogue(npcName, noMoneyLines);
         }
     }

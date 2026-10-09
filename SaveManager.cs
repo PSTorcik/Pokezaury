@@ -21,21 +21,22 @@ public class SavedInventoryItem
 [System.Serializable]
 public class SaveData
 {
-    // DANE GRACZA
-    public int level;
-    public int currentHP;
-    public int maxHP;
-    public int currentXP;
-    public int damage;
-    public int defense;
+    // DANE GRACZA I ŒWIAT
     public int gold;
-    public float movementSpeed;
-
-    // ŒWIAT I POZYCJA
     public float[] position;
     public string currentScene;
     public List<string> defeatedEnemies;
+    public List<string> collectedItemIDs;
     public List<string> collectedItems; // <--- DODANE (ID zebranych rzeczy z mapy)
+
+    // --- NOWOŒÆ: Lista Twojej dru¿yny ---
+    public List<Pokezaur> team;
+
+    // EKWIPUNEK
+    public List<string> itemNames;
+    public List<int> itemCounts;
+
+    public float movementSpeed;
 
     // EKWIPUNEK
     public List<SavedInventoryItem> inventory; // <--- ZMIENIONE na listê obiektów
@@ -67,12 +68,8 @@ public class SaveManager : MonoBehaviour
         SaveData data = new SaveData();
 
         // 1. Statystyki
-        data.level = playerData.unitLevel;
-        data.currentHP = playerData.currentHP;
-        data.maxHP = playerData.maxHP;
-        data.currentXP = playerData.currentXP;
-        data.damage = playerData.damage;
-        data.defense = playerData.defense;
+        data.team = new List<Pokezaur>(playerData.team);
+        data.collectedItemIDs = new List<string>(playerData.collectedItemIDs);
         data.gold = playerData.currentGold; // Zapisujemy z³oto
         data.movementSpeed = playerData.moveSpeed;
 
@@ -127,12 +124,8 @@ public class SaveManager : MonoBehaviour
             SaveData data = JsonUtility.FromJson<SaveData>(json);
 
             // 1. Przywracanie statystyk
-            playerData.unitLevel = data.level;
-            playerData.currentHP = data.currentHP;
-            playerData.maxHP = data.maxHP;
-            playerData.currentXP = data.currentXP;
-            playerData.damage = data.damage;
-            playerData.defense = data.defense;
+            playerData.team = new List<Pokezaur>(data.team);
+            playerData.collectedItemIDs = data.collectedItemIDs;
             playerData.currentGold = data.gold; // Wczytujemy z³oto
             playerData.moveSpeed = data.movementSpeed;
 

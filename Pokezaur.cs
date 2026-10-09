@@ -1,6 +1,6 @@
 using UnityEngine;
 
-[System.Serializable] // Bardzo wa¿ne! Pozwala widzieæ to w Inspektorze i zapisywaæ do pliku
+[System.Serializable] // Musi tu byæ, ¿eby dzia³a³ zapis gry i widok w Inspektorze!
 public class Pokezaur
 {
     public string pokeName;
@@ -13,7 +13,7 @@ public class Pokezaur
     public int xpToNextLevel;
     public Sprite sprite;
 
-    // Konstruktor do tworzenia nowego Pokezaura (np. przy ³apaniu dzikiego)
+    // Konstruktor do ³apania
     public Pokezaur(EnemyData wildEnemy)
     {
         pokeName = wildEnemy.enemyName;
@@ -25,6 +25,35 @@ public class Pokezaur
         sprite = wildEnemy.battleSprite;
 
         currentXP = 0;
-        xpToNextLevel = 100 * level; // Proste skalowanie XP
+        xpToNextLevel = 100 * level;
+    }
+
+    // Logika awansu przeniesiona z PlayerData
+    public bool AddXP(int amount)
+    {
+        currentXP += amount;
+        bool hasLeveledUp = false;
+
+        while (currentXP >= xpToNextLevel)
+        {
+            LevelUp();
+            hasLeveledUp = true;
+        }
+
+        return hasLeveledUp;
+    }
+
+    private void LevelUp()
+    {
+        level++;
+        currentXP -= xpToNextLevel;
+        xpToNextLevel = Mathf.RoundToInt(xpToNextLevel * 1.5f);
+
+        maxHP += 5;
+        currentHP = maxHP; // Leczenie przy awansie
+        damage += 2;
+        defense += 1;
+
+        Debug.Log($"{pokeName} awansuje na poziom {level}!");
     }
 }

@@ -29,17 +29,11 @@ public class MainMenu : MonoBehaviour
     public void NewGame()
     {
         // 1. Reset statystyk (Bez zmian)
-        playerData.unitLevel = startLevel;
-        playerData.maxHP = startMaxHP;
-        playerData.currentHP = startMaxHP;
-        playerData.damage = startDamage;
-        playerData.defense = startDefense;
-        playerData.currentXP = 0;
-        playerData.xpToNextLevel = 100;
+        playerData.team.Clear(); // WA¯NE: Pusta dru¿yna na start
         playerData.inventory.Clear();
         playerData.collectedItemIDs.Clear();
-        playerData.currentEquippedItem = null;
         playerData.currentGold = 0;
+        playerData.currentEquippedItem = null;
         playerData.moveSpeed = 5f;
 
         // 2. Reset managerów (Bez zmian)

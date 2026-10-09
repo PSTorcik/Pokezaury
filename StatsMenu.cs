@@ -95,14 +95,25 @@ public class StatsMenu : MonoBehaviour
 
     void UpdateStats()
     {
-        nameText.text = playerData.unitName;
-        levelText.text = "Poziom: " + playerData.unitLevel;
-        hpText.text = $"HP: {playerData.currentHP} / {playerData.maxHP}";
-        xpText.text = $"XP: {playerData.currentXP} / {playerData.xpToNextLevel}";
         goldText.text = $"{playerData.currentGold}";
-        AttackText.text = $"Si³a: {playerData.damage}";
-        DefText.text = $"Obrona: {playerData.defense}";
-        speedText.text = $"Prêdkoœæ: {playerData.moveSpeed}";
+
+        // Sprawdzamy czy mamy jakiegoœ stworka
+        if (playerData.team.Count > 0)
+        {
+            Pokezaur lead = playerData.team[0];
+            nameText.text = lead.pokeName;
+            levelText.text = "Poziom: " + lead.level;
+            hpText.text = $"HP: {lead.currentHP} / {lead.maxHP}";
+            xpText.text = $"XP: {lead.currentXP} / {lead.xpToNextLevel}";
+            AttackText.text = $"Si³a: {lead.damage}";
+            DefText.text = $"Obrona: {lead.defense}";
+        }
+        else
+        {
+            nameText.text = "Brak Pokezaurów";
+            levelText.text = ""; hpText.text = ""; xpText.text = "";
+            AttackText.text = ""; DefText.text = "";
+        }
     }
 
     void UpdateInventory()

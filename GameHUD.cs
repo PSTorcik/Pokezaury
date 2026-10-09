@@ -42,27 +42,40 @@ public class GameHUD : MonoBehaviour
 
     void UpdateStats()
     {
-        // Poziom
-        levelText.text = "LVL " + playerData.unitLevel;
-
-        // Pasek HP
-        hpSlider.maxValue = playerData.maxHP;
-        hpSlider.value = playerData.currentHP;
-        hpText.text = $"{playerData.currentHP} / {playerData.maxHP}";
-
-        // Pasek XP (Jeœli doda³eœ slider)
-        if (xpSlider != null)
+        // POPRAWKA: Pobieramy dane z pierwszego Pokezaura w dru¿ynie, jeœli istnieje
+        if (playerData != null && playerData.team != null && playerData.team.Count > 0)
         {
-            xpSlider.maxValue = playerData.xpToNextLevel;
-            xpSlider.value = playerData.currentXP;
+            Pokezaur leadPoke = playerData.team[0];
+
+            if (levelText != null) levelText.text = "LVL " + leadPoke.level;
+
+            if (hpSlider != null)
+            {
+                hpSlider.maxValue = leadPoke.maxHP;
+                hpSlider.value = leadPoke.currentHP;
+            }
+            if (hpText != null) hpText.text = $"{leadPoke.currentHP} / {leadPoke.maxHP}";
+
+            if (xpSlider != null)
+            {
+                xpSlider.maxValue = leadPoke.xpToNextLevel;
+                xpSlider.value = leadPoke.currentXP;
+            }
+            if (xpText != null)
+            {
+                xpText.text = $"{leadPoke.currentXP} / {leadPoke.xpToNextLevel} XP";
+            }
         }
-        if (xpText != null)
+        else
         {
-            // Wyœwietli np.: "45 / 100 XP"
-            xpText.text = $"{playerData.currentXP} / {playerData.xpToNextLevel} XP";
+            // Jeœli nie ma dru¿yny, czyœcimy HUD lub ustawiamy wartoœci domyœlne
+            if (levelText != null) levelText.text = "LVL 0";
+            if (hpSlider != null) { hpSlider.value = 0; hpSlider.maxValue = 1; }
+            if (hpText != null) hpText.text = "0 / 0";
+            if (xpSlider != null) { xpSlider.value = 0; xpSlider.maxValue = 1; }
+            if (xpText != null) xpText.text = "0 / 0 XP";
         }
     }
-    // --- DODAJ TO DO GameHUD.cs (poza funkcj¹ Update) ---
 
     private void OnEnable()
     {

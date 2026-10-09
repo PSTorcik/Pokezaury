@@ -183,9 +183,16 @@ public class BattleSystem : MonoBehaviour
             dialogueText.text = "Uda³o siê uciec!";
             yield return WaitForInputOrTime(1f);
 
-            playerDataSource.currentHP = playerUnit.currentHP;
+            // POPRAWKA: Znajdujemy ¿ywego Pokezaura i zapisujemy jego HP
+            foreach (Pokezaur poke in playerDataSource.team)
+            {
+                if (poke.currentHP > 0)
+                {
+                    poke.currentHP = playerUnit.currentHP;
+                    break;
+                }
+            }
 
-            // Ustawianie flag
             BattleTransitionManager.isReturningFromBattle = true;
             BattleTransitionManager.justRanAway = true;
 
@@ -398,49 +405,45 @@ public class BattleSystem : MonoBehaviour
 
 
             // 1. Pobieramy XP
+            // --- SYSTEM NAGRÓD ---
             int xpReward = BattleTransitionManager.enemyToFight.xpReward;
             int goldReward = BattleTransitionManager.enemyToFight.goldReward;
             playerDataSource.AddGold(goldReward);
 
             dialogueText.text = "Zdobywasz " + goldReward + " Z³ota!";
             yield return WaitForInputOrTime(1.5f);
-            // 2. Dodajemy XP do puli
-            playerDataSource.currentXP += xpReward;
-            dialogueText.text = "Zdobywasz " + xpReward + " XP!";
-            yield return WaitForInputOrTime(1.5f);
 
-            // 3. Sprawdzamy czy wbiliœmy poziom (Pêtla while - obs³uguje wbicie kilku lvli naraz)
-            while (playerDataSource.currentXP >= playerDataSource.xpToNextLevel)
+            // ZABEZPIECZENIE: Szukamy, kto walczy³
+            Pokezaur activePokezaur = null;
+            foreach (Pokezaur poke in playerDataSource.team)
             {
-                // Odejmujemy koszt poziomu
-                playerDataSource.currentXP -= playerDataSource.xpToNextLevel;
-
-                // Zwiêkszamy Level
-                playerDataSource.unitLevel++;
-
-                // --- TUTAJ JEST TO SKALOWANIE (x1.2) ---
-                // Stary próg * 1.2. Np. 100 -> 120 -> 144...
-                playerDataSource.xpToNextLevel = Mathf.RoundToInt(playerDataSource.xpToNextLevel * 2f);
-
-                // Zwiêkszamy statystyki
-                playerDataSource.maxHP += 5;
-                playerDataSource.damage += 1;
-
-                // Uleczamy gracza na full po awansie (Opcjonalnie)
-                playerDataSource.currentHP = playerDataSource.maxHP;
-                playerUnit.currentHP = playerDataSource.maxHP; // Aktualizujemy te¿ jednostkê na scenie
-                playerHUD.SetHP(playerUnit.currentHP);
-
-                // Info dla gracza
-                dialogueText.text = "AWANS! Poziom " + playerDataSource.unitLevel + "!";
-                yield return WaitForInputOrTime(1.5f);
-                dialogueText.text = "Statystyki wzros³y!";
-                yield return WaitForInputOrTime(1f);
+                if (poke.currentHP > 0) { activePokezaur = poke; break; }
             }
 
-            // --- ZAPIS STANU ---
-            // Zapisujemy aktualne HP gracza do ScriptableObject
-            playerDataSource.currentHP = playerUnit.currentHP;
+            if (activePokezaur != null)
+            {
+                dialogueText.text = activePokezaur.pokeName + " zdobywa " + xpReward + " XP!";
+                yield return WaitForInputOrTime(1.5f);
+
+                // AddXP jest teraz w Pokezaur.cs! Zwraca true, jeœli by³ awans.
+                bool leveledUp = activePokezaur.AddXP(xpReward);
+
+                if (leveledUp)
+                {
+                    // Uleczamy Pokezaura na full po awansie (Opcjonalnie)
+                    activePokezaur.currentHP = activePokezaur.maxHP;
+                    playerUnit.currentHP = activePokezaur.maxHP;
+                    playerHUD.SetHP(playerUnit.currentHP);
+
+                    dialogueText.text = "AWANS! Poziom " + activePokezaur.level + "!";
+                    yield return WaitForInputOrTime(1.5f);
+                    dialogueText.text = "Statystyki wzros³y!";
+                    yield return WaitForInputOrTime(1f);
+                }
+
+                // Zapisujemy aktualne HP tego Pokezaura po walce
+                activePokezaur.currentHP = playerUnit.currentHP;
+            }
 
             // Resetujemy flagê ucieczki
             BattleTransitionManager.justRanAway = false;
@@ -469,8 +472,15 @@ public class BattleSystem : MonoBehaviour
 
             BattleTransitionManager.isReturningFromBattle = false;
 
-            // Uleczamy gracza przed restartem, ¿eby nie zaczyna³ gry martwy
-            playerDataSource.currentHP = 1;
+            // POPRAWKA: Uleczamy pierwszego Pokezaura w dru¿ynie przed restartem, ¿eby nie zaczyna³ gry martwy (jeœli jakiegoœ ma)
+            if (playerDataSource.team.Count > 0)
+            {
+                // Mo¿esz wyleczyæ ca³¹ dru¿ynê lub tylko pierwszego. Wyleczmy ca³¹ dla pewnoœci.
+                foreach (Pokezaur p in playerDataSource.team)
+                {
+                    p.currentHP = p.maxHP; // Leczymy na full, ¿eby gracz nie umar³ od razu w trawie
+                }
+            }
 
             SceneManager.LoadScene("MapScene");
         }
