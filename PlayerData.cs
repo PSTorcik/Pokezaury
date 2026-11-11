@@ -26,6 +26,11 @@ public class PlayerData : ScriptableObject
     public float moveSpeed = 5f;
     public int currentGold = 0;
 
+
+    [Header("Ustawienia")]
+    public bool allowChinesePropaganda = false;
+
+
     [Header("Audio")]
     public AudioClip EQSound;
     public AudioClip potionSound;

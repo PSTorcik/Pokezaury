@@ -157,7 +157,27 @@ public class BattleSystem : MonoBehaviour
     {
         if (state != BattleState.PLAYERTURN) return;
 
-        StartCoroutine(UseItemRoutine());
+        // Szukamy pierwszej lepszej mikstury lecz¹cej w plecaku gracza
+        ItemData potionToUse = null;
+        foreach (InventorySlot slot in playerDataSource.inventory)
+        {
+            if (slot.item.itemType == ItemType.HealHP)
+            {
+                potionToUse = slot.item;
+                break; // ZnaleŸliœmy miksturê, przerywamy szukanie
+            }
+        }
+
+        // Jeœli mamy miksturê, przekazujemy j¹ do funkcji
+        if (potionToUse != null)
+        {
+            StartCoroutine(UseItemRoutine(potionToUse));
+        }
+        else
+        {
+            // Jeœli plecak jest pusty, informujemy gracza (nie traci tury)
+            dialogueText.text = "Nie masz ¿adnych mikstur w plecaku!";
+        }
     }
 
     // FUNKCJA: UCIECZKA

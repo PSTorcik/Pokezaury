@@ -2,38 +2,47 @@ using UnityEngine;
 
 public class StarterEgg : MonoBehaviour
 {
-    public EnemyData starterData; // Wrzuæ tu np. dane Ognistego, Wodnego lub Trawiastego stworka
+    [Header("Konfiguracja Startera")]
+    public EnemyData starterData;
+    [TextArea(3, 5)]
+    public string professorDescription;
 
-    [TextArea]
-    public string professorDescription; // Np. "Prof. Kasztan: To Ogniozaur. Jest porywczy. Chcesz go?"
+    [Header("Ustawienia Interakcji")]
+    public float interactionDistance = 1.5f;
 
-    private bool isPlayerClose;
+    // Zmieniliœmy typ zmiennej na Twój konkretny skrypt gracza
+    private PlayerMovement player;
 
     void Update()
     {
-        // Jeœli gracz jest blisko, nacisn¹³ E, a panel wyboru jeszcze nie jest otwarty
-        if (isPlayerClose && Input.GetKeyDown(KeyCode.E) && !StarterSelectionUI.instance.panel.activeSelf)
+        // Pancerne szukanie gracza w ka¿dej klatce, dopóki go nie znajdzie
+        if (player == null)
         {
-            StarterSelectionUI.instance.OpenPanel(starterData, professorDescription);
-        }
-    }
+            player = FindObjectOfType<PlayerMovement>();
 
-    private void OnTriggerEnter2D(Collider2D other)
-    {
-        if (other.CompareTag("Player"))
-        {
-            isPlayerClose = true;
-            // Opcjonalnie: Poka¿ powiadomienie "[E] Zbadaj Jajo"
-            if (InteractionUI.instance != null) InteractionUI.instance.ShowPrompt($"[E] Zbadaj jajko: {starterData.enemyName}");
+            // Jeœli gracza nadal nie ma w tej klatce, przerywamy Update i unikamy b³êdu
+            if (player == null) return;
         }
-    }
 
-    private void OnTriggerExit2D(Collider2D other)
-    {
-        if (other.CompareTag("Player"))
+        // Obliczamy dystans. 'player.transform.position' jest w 100% bezpieczne.
+        float distance = Vector2.Distance(transform.position, player.transform.position);
+        Debug.Log($"[{gameObject.name}] Dystans do gracza: {distance}");
+
+
+        if (distance <= interactionDistance)
         {
-            isPlayerClose = false;
-            if (InteractionUI.instance != null) InteractionUI.instance.HidePrompt();
+            if (GameNotifications.instance != null)
+            {
+                GameNotifications.instance.ShowMessage($"[E] Zbadaj jajko: {starterData.enemyName}", 0.5f);
+            }
+
+            if (Input.GetKeyDown(KeyCode.E))
+            {
+                if (StarterSelectionUI.instance != null && !StarterSelectionUI.instance.panel.activeSelf)
+                {
+                    StarterSelectionUI.instance.OpenPanel(starterData, professorDescription);
+                }
+            }
         }
     }
 }
