@@ -239,9 +239,17 @@ public class BattleSystem : MonoBehaviour
         StartCoroutine(PlayerHeal());
     }
 
+    // Podepnij pod przycisk u¿ycia Mikstury
     public void OnPotionButton()
     {
         if (state != BattleState.PLAYERTURN) return;
+
+        // Zabezpieczenie: nie marnuj mikstury i tury, jeœli nasz Pokezaur ma pe³ne HP
+        if (playerUnit.currentHP >= playerUnit.maxHP)
+        {
+            dialogueText.text = $"{activePokezaur.pokeName} ma ju¿ pe³ne HP!";
+            return;
+        }
 
         ItemData potionToUse = null;
         foreach (InventorySlot slot in playerDataSource.inventory)
@@ -260,6 +268,31 @@ public class BattleSystem : MonoBehaviour
         else
         {
             dialogueText.text = "Nie masz ¿adnych mikstur w plecaku!";
+        }
+    }
+
+    // NOWE: Podepnij pod przycisk ³apania (lub "Przedmioty", jeœli ma rzucaæ Jajem Pokezaura)
+    public void OnCatchButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+
+        ItemData catchItemToUse = null;
+        foreach (InventorySlot slot in playerDataSource.inventory)
+        {
+            if (slot.item.itemType == ItemType.CatchItem)
+            {
+                catchItemToUse = slot.item;
+                break;
+            }
+        }
+
+        if (catchItemToUse != null)
+        {
+            StartCoroutine(UseItemRoutine(catchItemToUse));
+        }
+        else
+        {
+            dialogueText.text = "Nie masz ¿adnych Jaj Pokezaura w plecaku!";
         }
     }
 

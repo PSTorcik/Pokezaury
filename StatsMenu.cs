@@ -47,6 +47,16 @@ public class StatsMenu : MonoBehaviour
             return;
         }
 
+        // NOWE: Nie pozwalaj otworzyæ okna statystyk (B) w trakcie dialogu lub wyboru startera
+        if (DialogueManager.instance != null && DialogueManager.instance.isDialogueActive)
+        {
+            return;
+        }
+        if (StarterSelectionUI.instance != null && StarterSelectionUI.instance.panel.activeSelf)
+        {
+            return;
+        }
+
         if (ShopMenu.instance != null && ShopMenu.instance.isShopOpen)
         {
             if (Input.GetKeyDown(KeyCode.B))

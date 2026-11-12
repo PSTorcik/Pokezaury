@@ -40,7 +40,8 @@ public class GameNotifications : MonoBehaviour
 
     IEnumerator HideAfterTime(float time)
     {
-        yield return new WaitForSeconds(time);
+        // U¿ywamy czasu rzeczywistego, ¿eby powiadomienia znika³y te¿ podczas pauzy i w sklepie (Time.timeScale = 0)
+        yield return new WaitForSecondsRealtime(time);
         messagePanel.SetActive(false);
     }
 }

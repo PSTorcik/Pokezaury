@@ -2,7 +2,7 @@
 using UnityEngine;
 using Unity.Cinemachine; // Lub 'using Cinemachine;' w zależności od wersji
 
-public class AssignBoundary : MonoBehaviour
+public class AssignCameraBounds : MonoBehaviour
 {
     void Start()
     {
@@ -207,6 +207,7 @@ public class BattleSystem : MonoBehaviour
     public GameObject partySwitchPanel;       // Panel z 6 przyciskami drużyny
     public Button[] partySlotButtons;         // 6 przycisków slotów
     public TextMeshProUGUI[] partySlotTexts;  // Teksty na 6 przyciskach (nazwa + HP)
+    public Image[] partySlotIcons;            // NOWE: 6 obrazków (Icon) wewnątrz przycisków
     public GameObject cancelSwitchButton;     // Przycisk "Anuluj" (ukrywany, gdy zmiana jest wymuszona po śmierci)
 
     [Header("Debug / Testowanie")]
@@ -324,11 +325,20 @@ public class BattleSystem : MonoBehaviour
                 Pokezaur poke = playerDataSource.team[i];
                 partySlotButtons[i].gameObject.SetActive(true);
 
-                // Jeśli to aktualnie walczący stworek, pokazujemy jego bieżące HP z playerUnit
                 int displayHP = (poke == activePokezaur) ? playerUnit.currentHP : poke.currentHP;
-                partySlotTexts[i].text = $"{poke.pokeName} (Lv.{poke.level})\nHP: {displayHP}/{poke.maxHP}";
+                string statusTag = (poke == activePokezaur) ? " [WALCZY]" : (displayHP <= 0 ? " [ZEMDLAŁ]" : "");
 
-                // Blokujemy kliknięcie w stworka, który ma 0 HP lub już jest na arenie
+                // Wyświetlamy Nazwę, Poziom, HP oraz statystyki ATK i DEF
+                partySlotTexts[i].text = $"<b>{poke.pokeName}</b> (Lv.{poke.level}){statusTag}\n" +
+                                         $"HP: {displayHP}/{poke.maxHP} | Siła: {poke.damage} | Obr: {poke.defense}";
+
+                // Wyświetlamy obrazek (przód) Pokezaura na przycisku
+                if (partySlotIcons != null && i < partySlotIcons.Length && partySlotIcons[i] != null)
+                {
+                    partySlotIcons[i].enabled = (poke.sprite != null);
+                    partySlotIcons[i].sprite = poke.sprite;
+                }
+
                 partySlotButtons[i].interactable = (displayHP > 0 && poke != activePokezaur);
             }
             else
@@ -1622,6 +1632,8 @@ public class Interactable : MonoBehaviour
 
     public void StartSpecificBattle()
     {
+        BattleTransitionManager.currentEnemyID = itemID;
+
         // 1. ZABEZPIECZENIE: Sprawdź czy przypisałeś wroga
         if (enemy == null)
         {
@@ -2191,7 +2203,7 @@ public class PlayerData : ScriptableObject
     }
 
     // --- UŻYWANIE PRZEDMIOTÓW (NA LIDERZE DRUŻYNY) ---
-    public void UseItem(ItemData item)
+    public void UseItem(ItemData item, int targetIndex = 0)
     {
         if (team.Count == 0 && item.itemType != ItemType.Gold)
         {
@@ -2199,15 +2211,16 @@ public class PlayerData : ScriptableObject
             return;
         }
 
-        Pokezaur leadPoke = (team.Count > 0) ? team[0] : null;
+        if (targetIndex < 0 || targetIndex >= team.Count) targetIndex = 0;
+        Pokezaur targetPoke = (team.Count > 0) ? team[targetIndex] : null;
 
         switch (item.itemType)
         {
             case ItemType.HealHP:
             case ItemType.Consumable:
-                if (leadPoke.currentHP >= leadPoke.maxHP) return;
-                leadPoke.currentHP += item.value;
-                if (leadPoke.currentHP > leadPoke.maxHP) leadPoke.currentHP = leadPoke.maxHP;
+                if (targetPoke.currentHP >= targetPoke.maxHP) return;
+                targetPoke.currentHP += item.value;
+                if (targetPoke.currentHP > targetPoke.maxHP) targetPoke.currentHP = targetPoke.maxHP;
                 RemoveItem(item);
                 if (item.itemType == ItemType.HealHP) PlaySound(potionSound);
                 else PlaySound(consumableSound);
@@ -2219,30 +2232,47 @@ public class PlayerData : ScriptableObject
                 break;
 
             case ItemType.PermSTR:
-                leadPoke.damage += item.value;
+                targetPoke.damage += item.value;
                 RemoveItem(item);
                 PlaySound(potionSound);
                 break;
 
             case ItemType.PermDEF:
-                leadPoke.defense += item.value;
+                targetPoke.defense += item.value;
                 RemoveItem(item);
                 PlaySound(potionSound);
                 break;
 
             case ItemType.PermHP:
-                leadPoke.maxHP += item.value;
-                leadPoke.currentHP += item.value;
+                targetPoke.maxHP += item.value;
+                targetPoke.currentHP += item.value;
                 RemoveItem(item);
                 PlaySound(potionSound);
                 break;
 
             case ItemType.Equipment:
-                HandleEquipment(item, leadPoke);
+                // Ekwipunek zawsze zakładamy na aktualnego lidera (team[0])
+                HandleEquipment(item, team[0]);
                 PlaySound(EQSound);
                 break;
         }
     }
+
+    public void SwapLeader(int newLeaderIndex)
+    {
+        if (newLeaderIndex <= 0 || newLeaderIndex >= team.Count) return;
+
+        // Jeśli lider ma założony przedmiot, zdejmujemy go przed zamianą i zakładamy nowemu liderowi
+        ItemData equipped = currentEquippedItem;
+        if (equipped != null) UnequipItem(team[0]);
+
+        Pokezaur temp = team[0];
+        team[0] = team[newLeaderIndex];
+        team[newLeaderIndex] = temp;
+
+        if (equipped != null) EquipItem(equipped, team[0]);
+    }
+
 
     void PlaySound(AudioClip clip)
     {
@@ -2891,6 +2921,7 @@ public class SaveManager : MonoBehaviour
             }
 
             // 6. Załadowanie sceny
+            BattleTransitionManager.isReturningFromBattle = false;
             SceneManager.LoadScene(data.currentScene);
             GameNotifications.instance.ShowMessage($"Gra wczytana", 3f);
         }
@@ -3184,6 +3215,12 @@ public class StarterEgg : MonoBehaviour
 
     void Update()
     {
+        // Jeśli gracz wybrał już swojego pierwszego Pokezaura, jajka nie powinny istnieć po powrocie do LabScene
+        if (player.playerData != null && player.playerData.team.Count > 0)
+        {
+            Destroy(gameObject);
+            return;
+        }
         // Pancerne szukanie gracza w każdej klatce, dopóki go nie znajdzie
         if (player == null)
         {
@@ -3195,8 +3232,6 @@ public class StarterEgg : MonoBehaviour
 
         // Obliczamy dystans. 'player.transform.position' jest w 100% bezpieczne.
         float distance = Vector2.Distance(transform.position, player.transform.position);
-        Debug.Log($"[{gameObject.name}] Dystans do gracza: {distance}");
-
 
         if (distance <= interactionDistance)
         {
@@ -3453,10 +3488,8 @@ public class StatsMenu : MonoBehaviour
     {
         if (selectedPokeIndex <= 0 || selectedPokeIndex >= playerData.team.Count) return;
 
-        // Zamieniamy miejscami obecnego lidera (0) z wybranym Pokezaurem
-        Pokezaur temp = playerData.team[0];
-        playerData.team[0] = playerData.team[selectedPokeIndex];
-        playerData.team[selectedPokeIndex] = temp;
+        // Bezpieczna zamiana lidera (przekłada też założony ekwipunek na nowego lidera)
+        playerData.SwapLeader(selectedPokeIndex);
 
         selectedPokeIndex = 0; // Teraz nasz wybrany stworek jest na pozycji 0
         UpdateStats();
@@ -3549,7 +3582,8 @@ public class StatsMenu : MonoBehaviour
 
     void OnItemClicked(ItemData item)
     {
-        playerData.UseItem(item);
+        // Używamy przedmiotu na aktualnie przeglądanym Pokezaurze (selectedPokeIndex)
+        playerData.UseItem(item, selectedPokeIndex);
         UpdateStats();
         UpdateInventory();
     }

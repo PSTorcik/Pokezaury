@@ -41,10 +41,20 @@ public class Interactable : MonoBehaviour
     // --- NOWOŒÆ: Sprawdzanie przy starcie ---
     void Start()
     {
-        // Jeœli to przedmiot i ju¿ go zebraliœmy -> zniszcz go od razu
+        // 1. Jeœli to przedmiot i ju¿ go zebraliœmy -> zniszcz go od razu
         if (type == InteractionType.Item && playerData != null)
         {
             if (playerData.CheckIfCollected(itemID))
+            {
+                Destroy(gameObject);
+                return;
+            }
+        }
+
+        // 2. NOWE: Jeœli to Trener i ju¿ go pokonaliœmy -> zniszcz go (lub wy³¹cz) po powrocie na mapê
+        if (type == InteractionType.Trainer)
+        {
+            if (BattleTransitionManager.defeatedEnemies.Contains(itemID))
             {
                 Destroy(gameObject);
             }

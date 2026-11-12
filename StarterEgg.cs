@@ -10,27 +10,27 @@ public class StarterEgg : MonoBehaviour
     [Header("Ustawienia Interakcji")]
     public float interactionDistance = 1.5f;
 
-    // Zmieniliœmy typ zmiennej na Twój konkretny skrypt gracza
     private PlayerMovement player;
 
     void Update()
     {
-        // Jeœli gracz wybra³ ju¿ swojego pierwszego Pokezaura, jajka nie powinny istnieæ po powrocie do LabScene
-        if (player.playerData != null && player.playerData.team.Count > 0)
-        {
-            Destroy(gameObject);
-            return;
-        }
-        // Pancerne szukanie gracza w ka¿dej klatce, dopóki go nie znajdzie
+        // 1. NAJPIERW szukamy gracza, jeœli zmienna jest pusta
         if (player == null)
         {
-            player = FindObjectOfType<PlayerMovement>();
+            player = FindFirstObjectByType<PlayerMovement>();
 
             // Jeœli gracza nadal nie ma w tej klatce, przerywamy Update i unikamy b³êdu
             if (player == null) return;
         }
 
-        // Obliczamy dystans. 'player.transform.position' jest w 100% bezpieczne.
+        // 2. DOPIERO GDY MAMY GRACZA: sprawdzamy, czy ma ju¿ startera w dru¿ynie
+        if (player.playerData != null && player.playerData.team.Count > 0)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        // 3. Obliczamy dystans
         float distance = Vector2.Distance(transform.position, player.transform.position);
 
         if (distance <= interactionDistance)
