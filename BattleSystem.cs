@@ -1,11 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI; // Potrzebne do obs³ugi Slidera
-using TMPro;          // Potrzebne do obs³ugi tekstów TextMeshPro
-using UnityEngine.SceneManagement; // Potrzebne do zmiany scen
+using UnityEngine.UI;
+using TMPro;
+using UnityEngine.SceneManagement;
 
-// Definicja stanów walki
 public enum BattleState { START, PLAYERTURN, ENEMYTURN, WON, LOST }
 
 public class BattleSystem : MonoBehaviour
@@ -23,38 +22,47 @@ public class BattleSystem : MonoBehaviour
     // ród³o danych gracza (ScriptableObject)
     public PlayerData playerDataSource;
 
-    // Tekst dialogowy (np. "Atakujesz!")
+    // Tekst dialogowy
     public TextMeshProUGUI dialogueText;
 
+    [Header("Panel zmiany Pokezaura w walce")]
+    public GameObject partySwitchPanel;       // Panel z 6 przyciskami dru¿yny
+    public Button[] partySlotButtons;         // 6 przycisków slotów
+    public TextMeshProUGUI[] partySlotTexts;  // Teksty na 6 przyciskach (nazwa + HP)
+    public Image[] partySlotIcons;            // NOWE: 6 obrazków (Icon) wewn¹trz przycisków
+    public GameObject cancelSwitchButton;     // Przycisk "Anuluj" (ukrywany, gdy zmiana jest wymuszona po œmierci)
+
     [Header("Debug / Testowanie")]
-    public EnemyData debugEnemy; // Tu wrzucisz wroga do testów
+    public EnemyData debugEnemy;
 
     [Header("DŸwiêki")]
-    public AudioClip victorySound; // Tu wrzucisz fanfary
-    public AudioClip defeatSound;  // Tu wrzucisz smutn¹ tr¹bkê
+    public AudioClip victorySound;
+    public AudioClip defeatSound;
     public AudioClip hitSound;
+
+    // Œledzimy dok³adnie tego Pokezaura, który aktualnie stoi na arenie
+    private Pokezaur activePokezaur;
+    private bool isForcedSwitch = false;
 
     void Start()
     {
+        if (partySwitchPanel != null)
+            partySwitchPanel.SetActive(false);
+
         state = BattleState.START;
         StartCoroutine(SetupBattle());
     }
 
     IEnumerator SetupBattle()
     {
-        // 1. Pobranie danych przeciwnika z Mened¿era Przejœcia
         EnemyData enemyData = BattleTransitionManager.enemyToFight;
 
-        // ZABEZPIECZENIE: Jeœli nie ma wroga w Managerze (np. testujemy sam¹ scenê walki), u¿yj testowego
         if (enemyData == null)
         {
             if (debugEnemy != null)
             {
                 Debug.LogWarning("TRYB TESTOWY: U¿ywam przeciwnika z pola DebugEnemy.");
                 enemyData = debugEnemy;
-
-                // KLUCZOWE: Przypisujemy go te¿ do Managera!
-                // Dziêki temu funkcja EndBattle() nie wyrzuci b³êdu przy rozdawaniu XP.
                 BattleTransitionManager.enemyToFight = debugEnemy;
             }
             else
@@ -65,127 +73,199 @@ public class BattleSystem : MonoBehaviour
             }
         }
 
-        // 2. Konfiguracja jednostek na scenie
         enemyUnit.SetupEnemy(enemyData);
 
+        // Szukamy pierwszego ¿ywego Pokezaura i zapisujemy go w polu klasy activePokezaur
+        activePokezaur = GetFirstAlivePokezaur();
 
-
-        //temp2
-        // --- ZMIENIONY KOD: Szukamy pierwszego ¿ywego Pokezaura ---
-        Pokezaur firstAlivePokezaur = null;
-
-        if (playerDataSource.team.Count > 0)
+        if (activePokezaur != null)
         {
-            foreach (Pokezaur poke in playerDataSource.team)
-            {
-                if (poke.currentHP > 0)
-                {
-                    firstAlivePokezaur = poke;
-                    break; // ZnaleŸliœmy! Przerywamy pêtlê.
-                }
-            }
-
-            if (firstAlivePokezaur != null)
-            {
-                // Wystawiamy znalezionego, ¿ywego Pokezaura
-                playerUnit.SetupPlayer(firstAlivePokezaur);
-            }
-            else
-            {
-                // PRZEGRANA: Nie mamy ¿ywych stworków!
-                dialogueText.text = "Nie masz Pokezaurów zdolnych do walki!";
-                yield return WaitForInputOrTime(1.5f);
-
-                state = BattleState.LOST;
-                EndBattle(); // Wywo³ujemy standardow¹ procedurê przegranej
-                yield break; // Przerywamy dalsze ³adowanie walki
-            }
+            playerUnit.SetupPlayer(activePokezaur);
         }
         else
         {
-            // PRZEGRANA: Nie mamy ¿adnych stworków!
-            dialogueText.text = "Nie masz ¿adnych Pokezaurów zdolnych do walki!";
+            dialogueText.text = "Nie masz Pokezaurów zdolnych do walki!";
             yield return WaitForInputOrTime(1.5f);
 
             state = BattleState.LOST;
-            EndBattle(); // Wywo³ujemy standardow¹ procedurê przegranej
-            yield break; // Przerywamy dalsze ³adowanie walki
+            EndBattle();
+            yield break;
         }
 
-            // 3. Konfiguracja pasków ¿ycia i tekstów
-            enemyHUD.SetHUD(enemyUnit);
-            playerHUD.SetHUD(playerUnit);
-
-        // --- NOWOŒÆ: Wyœwietlamy Jajka w UI ---
+        enemyHUD.SetHUD(enemyUnit);
+        playerHUD.SetHUD(playerUnit);
         playerHUD.UpdateTeamUI(playerDataSource.team);
 
-        // 4. Powitanie
         dialogueText.text = "Dzikie " + enemyUnit.unitName + " atakuje!";
+        yield return WaitForInputOrTime(0.5f);
 
-            yield return WaitForInputOrTime(0.5f);
+        state = BattleState.PLAYERTURN;
+        PlayerTurn();
+    }
 
-            state = BattleState.PLAYERTURN;
-            PlayerTurn();
+    private Pokezaur GetFirstAlivePokezaur()
+    {
+        foreach (Pokezaur poke in playerDataSource.team)
+        {
+            if (poke.currentHP > 0)
+                return poke;
         }
+        return null;
+    }
 
     void PlayerTurn()
     {
         dialogueText.text = "Wybierz akcjê:";
     }
 
-    // --- FUNKCJE PRZYCISKÓW (Podepnij w Unity pod OnClick) ---
+    // --- SYSTEM ZMIANY POKEZAURA W WALCE ---
+
+    // Podepnij pod przycisk "DRU¯YNA / ZMIEÑ" w menu walki
+    public void OnOpenPartyButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+
+        isForcedSwitch = false;
+        OpenPartySwitchPanel();
+    }
+
+    private void OpenPartySwitchPanel()
+    {
+        if (partySwitchPanel == null) return;
+
+        partySwitchPanel.SetActive(true);
+
+        // Jeœli zmiana jest wymuszona (po omdleniu), nie pozwalamy zamkn¹æ okna przyciskiem "Anuluj"
+        if (cancelSwitchButton != null)
+            cancelSwitchButton.SetActive(!isForcedSwitch);
+
+        // Odœwie¿amy wygl¹d 6 przycisków
+        for (int i = 0; i < partySlotButtons.Length; i++)
+        {
+            if (i < playerDataSource.team.Count)
+            {
+                Pokezaur poke = playerDataSource.team[i];
+                partySlotButtons[i].gameObject.SetActive(true);
+
+                int displayHP = (poke == activePokezaur) ? playerUnit.currentHP : poke.currentHP;
+                string statusTag = (poke == activePokezaur) ? " [WALCZY]" : (displayHP <= 0 ? " [ZEMDLA£]" : "");
+
+                // Wyœwietlamy Nazwê, Poziom, HP oraz statystyki ATK i DEF
+                partySlotTexts[i].text = $"<b>{poke.pokeName}</b> (Lv.{poke.level}){statusTag}\n" +
+                                         $"HP: {displayHP}/{poke.maxHP} | Si³a: {poke.damage} | Obr: {poke.defense}";
+
+                // Wyœwietlamy obrazek (przód) Pokezaura na przycisku
+                if (partySlotIcons != null && i < partySlotIcons.Length && partySlotIcons[i] != null)
+                {
+                    partySlotIcons[i].enabled = (poke.sprite != null);
+                    partySlotIcons[i].sprite = poke.sprite;
+                }
+
+                partySlotButtons[i].interactable = (displayHP > 0 && poke != activePokezaur);
+            }
+            else
+            {
+                partySlotButtons[i].gameObject.SetActive(false);
+            }
+        }
+    }
+
+    // Podepnij pod przycisk "Anuluj" w panelu dru¿yny
+    public void OnClosePartyButton()
+    {
+        if (isForcedSwitch) return; // Nie mo¿na anulowaæ, gdy obecny Pokezaur zemdla³
+        if (partySwitchPanel != null)
+            partySwitchPanel.SetActive(false);
+    }
+
+    // Podepnij pod 6 przycisków slotów (z argumentem int od 0 do 5)
+    public void OnSelectPartyMember(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= playerDataSource.team.Count) return;
+
+        Pokezaur chosenPoke = playerDataSource.team[slotIndex];
+        if (chosenPoke.currentHP <= 0 || chosenPoke == activePokezaur) return;
+
+        if (partySwitchPanel != null)
+            partySwitchPanel.SetActive(false);
+
+        StartCoroutine(SwitchPokezaurRoutine(chosenPoke));
+    }
+
+    IEnumerator SwitchPokezaurRoutine(Pokezaur newPokezaur)
+    {
+        state = BattleState.ENEMYTURN; // Blokujemy przyciski na czas animacji/komunikatu
+
+        // 1. Zapisujemy HP dotychczasowego Pokezaura (jeœli jeszcze ¿yje)
+        if (activePokezaur != null)
+        {
+            activePokezaur.currentHP = playerUnit.currentHP;
+        }
+
+        // 2. Ustawiamy nowego Pokezaura jako aktywnego
+        activePokezaur = newPokezaur;
+        playerUnit.SetupPlayer(activePokezaur);
+        playerHUD.SetHUD(playerUnit);
+        playerHUD.UpdateTeamUI(playerDataSource.team);
+
+        dialogueText.text = $"Do boju, {activePokezaur.pokeName}!";
+        yield return WaitForInputOrTime(1f);
+
+        // 3. Jeœli to by³a zmiana wymuszona po œmierci, gracz dostaje swoj¹ turê.
+        // Jeœli dobrowolna w trakcie tury — przechodzimy do tury wroga.
+        if (isForcedSwitch)
+        {
+            isForcedSwitch = false;
+            state = BattleState.PLAYERTURN;
+            PlayerTurn();
+        }
+        else
+        {
+            StartCoroutine(EnemyTurn());
+        }
+    }
+
+    // --- FUNKCJE PRZYCISKÓW AKCJI ---
 
     public void OnAttackButton()
     {
-        if (state != BattleState.PLAYERTURN)
-            return;
-
+        if (state != BattleState.PLAYERTURN) return;
         StartCoroutine(PlayerAttack());
     }
 
     public void OnHealButton()
     {
-        if (state != BattleState.PLAYERTURN)
-            return;
-
+        if (state != BattleState.PLAYERTURN) return;
         StartCoroutine(PlayerHeal());
     }
 
-    // Itemki
-    // PODEPNIJ TO POD PRZYCISK "HEAL" lub "ITEM"
     public void OnPotionButton()
     {
         if (state != BattleState.PLAYERTURN) return;
 
-        // Szukamy pierwszej lepszej mikstury lecz¹cej w plecaku gracza
         ItemData potionToUse = null;
         foreach (InventorySlot slot in playerDataSource.inventory)
         {
             if (slot.item.itemType == ItemType.HealHP)
             {
                 potionToUse = slot.item;
-                break; // ZnaleŸliœmy miksturê, przerywamy szukanie
+                break;
             }
         }
 
-        // Jeœli mamy miksturê, przekazujemy j¹ do funkcji
         if (potionToUse != null)
         {
             StartCoroutine(UseItemRoutine(potionToUse));
         }
         else
         {
-            // Jeœli plecak jest pusty, informujemy gracza (nie traci tury)
             dialogueText.text = "Nie masz ¿adnych mikstur w plecaku!";
         }
     }
 
-    // FUNKCJA: UCIECZKA
     public void OnRunButton()
     {
-        // Mo¿na uciekaæ tylko w swojej turze
         if (state != BattleState.PLAYERTURN) return;
-
         StartCoroutine(TryToRun());
     }
 
@@ -197,20 +277,15 @@ public class BattleSystem : MonoBehaviour
 
         bool success = Random.Range(0, 2) == 0;
 
-
         if (success)
         {
             dialogueText.text = "Uda³o siê uciec!";
             yield return WaitForInputOrTime(1f);
 
-            // POPRAWKA: Znajdujemy ¿ywego Pokezaura i zapisujemy jego HP
-            foreach (Pokezaur poke in playerDataSource.team)
+            // POPRAWKA: Zapisujemy HP dok³adnie tego Pokezaura, który aktualnie walczy³
+            if (activePokezaur != null)
             {
-                if (poke.currentHP > 0)
-                {
-                    poke.currentHP = playerUnit.currentHP;
-                    break;
-                }
+                activePokezaur.currentHP = playerUnit.currentHP;
             }
 
             BattleTransitionManager.isReturningFromBattle = true;
@@ -220,43 +295,42 @@ public class BattleSystem : MonoBehaviour
         }
         else
         {
-            // --- SCENARIUSZ: PORA¯KA ---
             dialogueText.text = "Nie uda³o siê uciec!";
             yield return WaitForInputOrTime(1f);
 
             dialogueText.text = "Tracisz turê!";
             yield return WaitForInputOrTime(1f);
 
-            // Skoro ucieczka siê nie uda³a, nastêpuje tura przeciwnika
             StartCoroutine(EnemyTurn());
         }
     }
 
     IEnumerator UseItemRoutine(ItemData itemToUse)
     {
-        state = BattleState.ENEMYTURN; // Zu¿ywamy turê
+        state = BattleState.ENEMYTURN;
 
         playerDataSource.RemoveItem(itemToUse);
         dialogueText.text = $"U¿yto: {itemToUse.itemName}!";
         yield return WaitForInputOrTime(1f);
 
-        // --- MECHANIKA £APANIA ---
         if (itemToUse.itemType == ItemType.CatchItem)
         {
             dialogueText.text = "Rzucasz Jajem Pokezaura!";
             yield return WaitForInputOrTime(1f);
 
-            // Losowanie 50%
             if (Random.value <= 0.5f)
             {
-                // SUKCES
                 dialogueText.text = "Uda³o siê! Pokezaur z³apany!";
                 yield return WaitForInputOrTime(1.5f);
 
-                // Sprawdzamy czy mamy miejsce w dru¿ynie
+                // POPRAWKA: Zapisujemy aktualne HP naszego walcz¹cego Pokezaura przed wyjœciem na mapê!
+                if (activePokezaur != null)
+                {
+                    activePokezaur.currentHP = playerUnit.currentHP;
+                }
+
                 if (playerDataSource.team.Count < 6)
                 {
-                    // Tworzymy nowego Pokezaura z danych wroga i dodajemy do dru¿yny
                     Pokezaur newPoke = new Pokezaur(BattleTransitionManager.enemyToFight);
                     playerDataSource.team.Add(newPoke);
                     dialogueText.text = $"{newPoke.pokeName} do³¹cza do dru¿yny!";
@@ -268,7 +342,6 @@ public class BattleSystem : MonoBehaviour
 
                 yield return WaitForInputOrTime(1.5f);
 
-                // Koñczymy walkê jak przy wygranej (ale bez XP)
                 BattleTransitionManager.justRanAway = false;
                 BattleTransitionManager.defeatedEnemies.Add(BattleTransitionManager.currentEnemyID);
                 SceneManager.LoadScene("MapScene");
@@ -276,25 +349,25 @@ public class BattleSystem : MonoBehaviour
             }
             else
             {
-                // PORA¯KA
                 dialogueText.text = "O nie! Pokezaur siê uwolni³!";
                 yield return WaitForInputOrTime(1f);
             }
         }
-        // --- MECHANIKA LECZENIA (Dla pierwszego stworka) ---
         else if (itemToUse.itemType == ItemType.HealHP)
         {
             playerUnit.Heal(itemToUse.value);
             playerHUD.SetHP(playerUnit.currentHP);
 
-            // Zapisujemy od razu w strukturze dru¿yny
-            playerDataSource.team[0].currentHP = playerUnit.currentHP;
+            // POPRAWKA: Zapisujemy uleczone HP do aktywnie walcz¹cego Pokezaura (a nie sztywno do team[0])
+            if (activePokezaur != null)
+            {
+                activePokezaur.currentHP = playerUnit.currentHP;
+            }
 
             dialogueText.text = $"+{itemToUse.value} HP!";
             yield return WaitForInputOrTime(1f);
         }
 
-        // Tura wroga
         StartCoroutine(EnemyTurn());
     }
 
@@ -302,20 +375,12 @@ public class BattleSystem : MonoBehaviour
 
     IEnumerator PlayerAttack()
     {
-        // Blokujemy przyciski
         state = BattleState.ENEMYTURN;
 
-        // 1. Wylosowanie obra¿eñ (zgodnie z funkcj¹ w BattleUnit)
         int dmg = playerUnit.CalculateDamage();
-
-        // 2. Zadanie obra¿eñ przeciwnikowi (funkcja zwraca true, jeœli wróg zgin¹³)
-        // Uwaga: TakeDamage wewn¹trz BattleUnit uwzglêdnia ju¿ Obronê (defense)!
         bool isDead = enemyUnit.TakeDamage(dmg);
-
-        // 3. Aktualizacja UI przeciwnika
         enemyHUD.SetHP(enemyUnit.currentHP);
 
-        // 4. Informacja tekstowa
         dialogueText.text = "Zadajesz " + dmg + " pkt obra¿eñ!";
 
         if (hitSound != null && AudioManager.instance != null)
@@ -325,7 +390,6 @@ public class BattleSystem : MonoBehaviour
 
         yield return WaitForInputOrTime(0.5f);
 
-        // 5. Sprawdzenie wyniku
         if (isDead)
         {
             state = BattleState.WON;
@@ -341,28 +405,23 @@ public class BattleSystem : MonoBehaviour
     {
         state = BattleState.ENEMYTURN;
 
-        // WZÓR: (2 * Poziom) + 6
-        // Pobieramy level z jednostki gracza
         int healAmount = (playerUnit.unitLevel * 2) + 6;
-
         int minHeal = Mathf.FloorToInt(healAmount * 0.9f);
         int maxHeal = Mathf.FloorToInt(healAmount * 1.1f);
-
-        // Zabezpieczenie: ¿eby nie zadaæ 0 lub ujemnych obra¿eñ
         if (minHeal < 1) minHeal = 1;
 
-        // Random.Range dla int jest ekskluzywne dla górnej granicy, wiêc dajemy +1
         int healRandom = Random.Range(minHeal, maxHeal + 1);
 
-        // Wykonujemy leczenie
         playerUnit.Heal(healRandom);
-
-        // Aktualizujemy pasek ¿ycia i liczby
         playerHUD.SetHP(playerUnit.currentHP);
 
-        // Wyœwietlamy graczowi konkretn¹ liczbê uleczonych punktów
-        dialogueText.text = "Odzyskujesz " + healRandom + " HP!";
+        // POPRAWKA: Synchronizujemy HP z obiektem aktywnego Pokezaura
+        if (activePokezaur != null)
+        {
+            activePokezaur.currentHP = playerUnit.currentHP;
+        }
 
+        dialogueText.text = "Odzyskujesz " + healRandom + " HP!";
         yield return WaitForInputOrTime(0.5f);
 
         StartCoroutine(EnemyTurn());
@@ -371,26 +430,54 @@ public class BattleSystem : MonoBehaviour
     IEnumerator EnemyTurn()
     {
         dialogueText.text = enemyUnit.unitName + " atakuje!";
-
         yield return WaitForInputOrTime(0.5f);
 
-        // 1. Wróg losuje obra¿enia
         int dmg = enemyUnit.CalculateDamage();
-
-        // 2. Gracz otrzymuje obra¿enia
         bool isDead = playerUnit.TakeDamage(dmg);
-
-        // 3. Aktualizacja UI gracza
         playerHUD.SetHP(playerUnit.currentHP);
 
-        dialogueText.text = enemyUnit.unitName + " zada³ Ci " + dmg + " obra¿eñ!";
+        // Zapisujemy aktualne HP w obiekcie naszego Pokezaura
+        if (activePokezaur != null)
+        {
+            activePokezaur.currentHP = playerUnit.currentHP;
+        }
 
+        dialogueText.text = enemyUnit.unitName + " zada³ Ci " + dmg + " obra¿eñ!";
         yield return WaitForInputOrTime(0.5f);
 
         if (isDead)
         {
-            state = BattleState.LOST;
-            EndBattle();
+            // Odœwie¿amy ikonki jajek (jedno jajko staje siê szare/martwe)
+            playerHUD.UpdateTeamUI(playerDataSource.team);
+
+            dialogueText.text = $"{activePokezaur.pokeName} pada nieprzytomny!";
+            yield return WaitForInputOrTime(1.5f);
+
+            // Sprawdzamy, czy mamy jeszcze jakiegokolwiek ¿ywego Pokezaura w dru¿ynie
+            Pokezaur nextAlive = GetFirstAlivePokezaur();
+
+            if (nextAlive != null)
+            {
+                // Jeœli mamy podpiêty panel wyboru dru¿yny, otwieramy go w trybie wymuszonym
+                if (partySwitchPanel != null)
+                {
+                    dialogueText.text = "Wybierz kolejnego Pokezaura!";
+                    isForcedSwitch = true;
+                    OpenPartySwitchPanel();
+                }
+                else
+                {
+                    // Zabezpieczenie: jeœli nie zbudowa³eœ jeszcze panelu UI, automatycznie wypuszcza kolejnego ¿ywego!
+                    isForcedSwitch = true;
+                    yield return StartCoroutine(SwitchPokezaurRoutine(nextAlive));
+                }
+            }
+            else
+            {
+                // Dopiero gdy WSZYSTKIE Pokezaury w dru¿ynie maj¹ 0 HP -> przegrywamy walkê
+                state = BattleState.LOST;
+                EndBattle();
+            }
         }
         else
         {
@@ -414,18 +501,11 @@ public class BattleSystem : MonoBehaviour
                 AudioManager.instance.StopMusic();
 
             if (victorySound != null && AudioManager.instance != null)
-            {
                 AudioManager.instance.PlaySFX(victorySound);
-            }
+
             dialogueText.text = "Wygra³eœ walkê!";
             yield return WaitForInputOrTime(1.5f);
 
-            // --- SYSTEM NAGRÓD (POPRAWIONY) ---
-
-
-
-            // 1. Pobieramy XP
-            // --- SYSTEM NAGRÓD ---
             int xpReward = BattleTransitionManager.enemyToFight.xpReward;
             int goldReward = BattleTransitionManager.enemyToFight.goldReward;
             playerDataSource.AddGold(goldReward);
@@ -433,45 +513,31 @@ public class BattleSystem : MonoBehaviour
             dialogueText.text = "Zdobywasz " + goldReward + " Z³ota!";
             yield return WaitForInputOrTime(1.5f);
 
-            // ZABEZPIECZENIE: Szukamy, kto walczy³
-            Pokezaur activePokezaur = null;
-            foreach (Pokezaur poke in playerDataSource.team)
-            {
-                if (poke.currentHP > 0) { activePokezaur = poke; break; }
-            }
-
             if (activePokezaur != null)
             {
+                // Najpierw zapisujemy HP, z jakim skoñczy³ walkê
+                activePokezaur.currentHP = playerUnit.currentHP;
+
                 dialogueText.text = activePokezaur.pokeName + " zdobywa " + xpReward + " XP!";
                 yield return WaitForInputOrTime(1.5f);
 
-                // AddXP jest teraz w Pokezaur.cs! Zwraca true, jeœli by³ awans.
                 bool leveledUp = activePokezaur.AddXP(xpReward);
 
                 if (leveledUp)
                 {
-                    // Uleczamy Pokezaura na full po awansie (Opcjonalnie)
-                    activePokezaur.currentHP = activePokezaur.maxHP;
-                    playerUnit.currentHP = activePokezaur.maxHP;
-                    playerHUD.SetHP(playerUnit.currentHP);
+                    // POPRAWKA: Odœwie¿amy ca³e playerUnit i HUD (nowe maxHP, nowy level i pe³ne HP)
+                    playerUnit.SetupPlayer(activePokezaur);
+                    playerHUD.SetHUD(playerUnit);
 
                     dialogueText.text = "AWANS! Poziom " + activePokezaur.level + "!";
                     yield return WaitForInputOrTime(1.5f);
                     dialogueText.text = "Statystyki wzros³y!";
                     yield return WaitForInputOrTime(1f);
                 }
-
-                // Zapisujemy aktualne HP tego Pokezaura po walce
-                activePokezaur.currentHP = playerUnit.currentHP;
             }
 
-            // Resetujemy flagê ucieczki
             BattleTransitionManager.justRanAway = false;
-
-            // Dodajemy wroga do listy pokonanych
             BattleTransitionManager.defeatedEnemies.Add(BattleTransitionManager.currentEnemyID);
-
-            // Wracamy na mapê
             SceneManager.LoadScene("MapScene");
         }
         else if (state == BattleState.LOST)
@@ -480,9 +546,7 @@ public class BattleSystem : MonoBehaviour
                 AudioManager.instance.StopMusic();
 
             if (defeatSound != null && AudioManager.instance != null)
-            {
                 AudioManager.instance.PlaySFX(defeatSound);
-            }
 
             int lostGold = playerDataSource.LoseGoldOnDeath();
             dialogueText.text = "Zosta³eœ pokonany...";
@@ -492,13 +556,11 @@ public class BattleSystem : MonoBehaviour
 
             BattleTransitionManager.isReturningFromBattle = false;
 
-            // POPRAWKA: Uleczamy pierwszego Pokezaura w dru¿ynie przed restartem, ¿eby nie zaczyna³ gry martwy (jeœli jakiegoœ ma)
             if (playerDataSource.team.Count > 0)
             {
-                // Mo¿esz wyleczyæ ca³¹ dru¿ynê lub tylko pierwszego. Wyleczmy ca³¹ dla pewnoœci.
                 foreach (Pokezaur p in playerDataSource.team)
                 {
-                    p.currentHP = p.maxHP; // Leczymy na full, ¿eby gracz nie umar³ od razu w trawie
+                    p.currentHP = p.maxHP;
                 }
             }
 
@@ -506,25 +568,16 @@ public class BattleSystem : MonoBehaviour
         }
     }
 
-    // Funkcja, która czeka X sekund, ALE przerywa natychmiast po klikniêciu mysz¹
     IEnumerator WaitForInputOrTime(float duration)
     {
         float timer = 0f;
-
-        // Pêtla dzia³a dopóki czas nie min¹³
         while (timer < duration)
         {
-            // Jeœli wciœniêto Lewy Przycisk Myszy (0) lub Spacjê
             if (Input.GetMouseButtonDown(0) || Input.GetKeyDown(KeyCode.Space))
             {
-                // Przerywamy czekanie (pomijamy resztê czasu)
                 yield break;
             }
-
-            // Dodajemy czas, jaki min¹³ od ostatniej klatki
             timer += Time.deltaTime;
-
-            // Czekamy jedn¹ klatkê
             yield return null;
         }
     }

@@ -1,0 +1,3556 @@
+﻿=== PLIK: AssignCameraBounds.cs ===
+using UnityEngine;
+using Unity.Cinemachine; // Lub 'using Cinemachine;' w zależności od wersji
+
+public class AssignBoundary : MonoBehaviour
+{
+    void Start()
+    {
+        // Szukamy komponentu graniczącego w załadowanej kamerze
+        CinemachineConfiner2D confiner = FindObjectOfType<CinemachineConfiner2D>();
+
+        if (confiner != null)
+        {
+            // Przypinamy ten konkretny Polygon Collider do kamery
+            PolygonCollider2D myCollider = GetComponent<PolygonCollider2D>();
+            confiner.BoundingShape2D = myCollider;
+
+            // Odświeżamy cache, żeby kamera nie pamiętała starej mapy
+            confiner.InvalidateBoundingShapeCache();
+        }
+    }
+}
+=== PLIK: AudioManager.cs ===
+using UnityEngine;
+
+public class AudioManager : MonoBehaviour
+{
+    public static AudioManager instance;
+
+    [Header("Źródła Dźwięku (Przypisz w Inspectorze)")]
+    public AudioSource musicSource; // Kanał muzyki
+    public AudioSource sfxSource;   // Kanał efektów
+
+    // Zmienne do trzymania głośności
+    private float musicVolume = 0.5f;
+    private float sfxVolume = 0.5f;
+
+    void Awake()
+    {
+        if (instance == null)
+        {
+            instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    public void StopMusic()
+    {
+        musicSource.Stop();
+    }
+
+    // --- FUNKCJE DLA SUWAKÓW ---
+
+    public void SetMusicVolume(float volume)
+    {
+        musicVolume = volume;
+        musicSource.volume = musicVolume;
+    }
+
+    public void SetSFXVolume(float volume)
+    {
+        sfxVolume = volume;
+        sfxSource.volume = sfxVolume;
+    }
+
+    // --- ODTWARZANIE MUZYKI (TŁO) ---
+    public void PlayMusic(AudioClip clip)
+    {
+        if (clip == null) return;
+
+        // Sprytny warunek: Jeśli ta piosenka już gra, nie resetuj jej!
+        if (musicSource.clip == clip && musicSource.isPlaying) return;
+
+        musicSource.clip = clip;
+        musicSource.loop = true; // Muzyka zawsze w pętli
+        musicSource.volume = musicVolume; // Ustaw głośność suwaka
+        musicSource.Play();
+    }
+
+    // --- ODTWARZANIE EFEKTÓW (JEDNORAZOWE) ---
+    // Tego używasz do kroków, ataków, kliknięć
+    public void PlaySFX(AudioClip clip)
+    {
+        if (clip == null) return;
+
+        // PlayOneShot pozwala na nakładanie się dźwięków (np. wybuch i krzyk naraz)
+        sfxSource.PlayOneShot(clip, sfxVolume);
+    }
+    public float GetMusicVolume()
+    {
+        return musicVolume;
+    }
+
+    public float GetSFXVolume()
+    {
+        return sfxVolume;
+    }
+}
+=== PLIK: BattleHUD.cs ===
+using UnityEngine;
+using UnityEngine.UI; // WAŻNE: Wymagane do obsługi Text i Slider
+using TMPro;
+using System.Collections.Generic; //lista
+
+public class BattleHUD : MonoBehaviour
+{
+    public TextMeshProUGUI nameText;
+    public TextMeshProUGUI levelText;
+    public Slider hpSlider;
+
+    // 1. NOWE: Pole na tekst z liczbami HP
+    public TextMeshProUGUI hpText;
+
+    // 2. NOWE: Zmienna prywatna do zapamiętania Max HP
+    private int _maxHP;
+
+    [Header("Drużyna (Jajka)")]
+    public Image[] teamEggs; // Tablica 6 obrazków reprezentujących jajka
+    public Color aliveColor = new Color(1f, 1f, 1f, 1f); // Zwykły (Biały)
+    public Color faintedColor = new Color(0.3f, 0.3f, 0.3f, 1f); // Ciemny szary (Zemdlał)
+
+    // Ta funkcja ustawi UI na samym początku walki
+    public void SetHUD(BattleUnit unit)
+    {
+        nameText.text = unit.unitName;
+        levelText.text = "Lvl " + unit.unitLevel;
+
+        hpSlider.maxValue = unit.maxHP;
+        hpSlider.value = unit.currentHP;
+
+        // 3. NOWE: Zapamiętujemy MaxHP i ustawiamy tekst startowy
+        _maxHP = unit.maxHP;
+        hpText.text = unit.currentHP + " / " + _maxHP;
+    }
+
+    public void SetHP(int hp)
+    {
+        hpSlider.value = hp;
+
+        // 4. NOWE: Aktualizujemy tekst używając nowej wartości i zapamiętanego Max
+        hpText.text = hp + " / " + _maxHP;
+    }
+
+    // --- NOWA FUNKCJA: Aktualizacja Ikon Jajek ---
+    public void UpdateTeamUI(List<Pokezaur> team)
+    {
+        // Sprawdzamy wszystkie 6 miejsc na jajka
+        for (int i = 0; i < teamEggs.Length; i++)
+        {
+            if (i < team.Count)
+            {
+                // Mamy Pokezaura na tym slocie
+                teamEggs[i].gameObject.SetActive(true); // Pokazujemy jajko
+
+                if (team[i].currentHP > 0)
+                {
+                    teamEggs[i].color = aliveColor; // Żyje = jasne
+                }
+                else
+                {
+                    teamEggs[i].color = faintedColor; // Nie żyje = ciemne
+                }
+            }
+            else
+            {
+                // Nie mamy Pokezaura na tym slocie (np. mamy tylko 3, a to jest slot 4)
+                teamEggs[i].gameObject.SetActive(false); // Ukrywamy jajko
+            }
+        }
+    }
+
+
+}
+=== PLIK: BattleSystem.cs ===
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using UnityEngine.SceneManagement;
+
+public enum BattleState { START, PLAYERTURN, ENEMYTURN, WON, LOST }
+
+public class BattleSystem : MonoBehaviour
+{
+    public BattleState state;
+
+    // Jednostki na scenie
+    public BattleUnit playerUnit;
+    public BattleUnit enemyUnit;
+
+    // Interfejsy (HUD)
+    public BattleHUD playerHUD;
+    public BattleHUD enemyHUD;
+
+    // Źródło danych gracza (ScriptableObject)
+    public PlayerData playerDataSource;
+
+    // Tekst dialogowy
+    public TextMeshProUGUI dialogueText;
+
+    [Header("Panel zmiany Pokezaura w walce")]
+    public GameObject partySwitchPanel;       // Panel z 6 przyciskami drużyny
+    public Button[] partySlotButtons;         // 6 przycisków slotów
+    public TextMeshProUGUI[] partySlotTexts;  // Teksty na 6 przyciskach (nazwa + HP)
+    public GameObject cancelSwitchButton;     // Przycisk "Anuluj" (ukrywany, gdy zmiana jest wymuszona po śmierci)
+
+    [Header("Debug / Testowanie")]
+    public EnemyData debugEnemy;
+
+    [Header("Dźwięki")]
+    public AudioClip victorySound;
+    public AudioClip defeatSound;
+    public AudioClip hitSound;
+
+    // Śledzimy dokładnie tego Pokezaura, który aktualnie stoi na arenie
+    private Pokezaur activePokezaur;
+    private bool isForcedSwitch = false;
+
+    void Start()
+    {
+        if (partySwitchPanel != null)
+            partySwitchPanel.SetActive(false);
+
+        state = BattleState.START;
+        StartCoroutine(SetupBattle());
+    }
+
+    IEnumerator SetupBattle()
+    {
+        EnemyData enemyData = BattleTransitionManager.enemyToFight;
+
+        if (enemyData == null)
+        {
+            if (debugEnemy != null)
+            {
+                Debug.LogWarning("TRYB TESTOWY: Używam przeciwnika z pola DebugEnemy.");
+                enemyData = debugEnemy;
+                BattleTransitionManager.enemyToFight = debugEnemy;
+            }
+            else
+            {
+                Debug.LogError("BŁĄD: Brak przeciwnika! Odpal grę od Mapy albo przypisz DebugEnemy.");
+                dialogueText.text = "Błąd: Brak danych wroga!";
+                yield break;
+            }
+        }
+
+        enemyUnit.SetupEnemy(enemyData);
+
+        // Szukamy pierwszego żywego Pokezaura i zapisujemy go w polu klasy activePokezaur
+        activePokezaur = GetFirstAlivePokezaur();
+
+        if (activePokezaur != null)
+        {
+            playerUnit.SetupPlayer(activePokezaur);
+        }
+        else
+        {
+            dialogueText.text = "Nie masz Pokezaurów zdolnych do walki!";
+            yield return WaitForInputOrTime(1.5f);
+
+            state = BattleState.LOST;
+            EndBattle();
+            yield break;
+        }
+
+        enemyHUD.SetHUD(enemyUnit);
+        playerHUD.SetHUD(playerUnit);
+        playerHUD.UpdateTeamUI(playerDataSource.team);
+
+        dialogueText.text = "Dzikie " + enemyUnit.unitName + " atakuje!";
+        yield return WaitForInputOrTime(0.5f);
+
+        state = BattleState.PLAYERTURN;
+        PlayerTurn();
+    }
+
+    private Pokezaur GetFirstAlivePokezaur()
+    {
+        foreach (Pokezaur poke in playerDataSource.team)
+        {
+            if (poke.currentHP > 0)
+                return poke;
+        }
+        return null;
+    }
+
+    void PlayerTurn()
+    {
+        dialogueText.text = "Wybierz akcję:";
+    }
+
+    // --- SYSTEM ZMIANY POKEZAURA W WALCE ---
+
+    // Podepnij pod przycisk "DRUŻYNA / ZMIEŃ" w menu walki
+    public void OnOpenPartyButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+
+        isForcedSwitch = false;
+        OpenPartySwitchPanel();
+    }
+
+    private void OpenPartySwitchPanel()
+    {
+        if (partySwitchPanel == null) return;
+
+        partySwitchPanel.SetActive(true);
+
+        // Jeśli zmiana jest wymuszona (po omdleniu), nie pozwalamy zamknąć okna przyciskiem "Anuluj"
+        if (cancelSwitchButton != null)
+            cancelSwitchButton.SetActive(!isForcedSwitch);
+
+        // Odświeżamy wygląd 6 przycisków
+        for (int i = 0; i < partySlotButtons.Length; i++)
+        {
+            if (i < playerDataSource.team.Count)
+            {
+                Pokezaur poke = playerDataSource.team[i];
+                partySlotButtons[i].gameObject.SetActive(true);
+
+                // Jeśli to aktualnie walczący stworek, pokazujemy jego bieżące HP z playerUnit
+                int displayHP = (poke == activePokezaur) ? playerUnit.currentHP : poke.currentHP;
+                partySlotTexts[i].text = $"{poke.pokeName} (Lv.{poke.level})\nHP: {displayHP}/{poke.maxHP}";
+
+                // Blokujemy kliknięcie w stworka, który ma 0 HP lub już jest na arenie
+                partySlotButtons[i].interactable = (displayHP > 0 && poke != activePokezaur);
+            }
+            else
+            {
+                partySlotButtons[i].gameObject.SetActive(false);
+            }
+        }
+    }
+
+    // Podepnij pod przycisk "Anuluj" w panelu drużyny
+    public void OnClosePartyButton()
+    {
+        if (isForcedSwitch) return; // Nie można anulować, gdy obecny Pokezaur zemdlał
+        if (partySwitchPanel != null)
+            partySwitchPanel.SetActive(false);
+    }
+
+    // Podepnij pod 6 przycisków slotów (z argumentem int od 0 do 5)
+    public void OnSelectPartyMember(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= playerDataSource.team.Count) return;
+
+        Pokezaur chosenPoke = playerDataSource.team[slotIndex];
+        if (chosenPoke.currentHP <= 0 || chosenPoke == activePokezaur) return;
+
+        if (partySwitchPanel != null)
+            partySwitchPanel.SetActive(false);
+
+        StartCoroutine(SwitchPokezaurRoutine(chosenPoke));
+    }
+
+    IEnumerator SwitchPokezaurRoutine(Pokezaur newPokezaur)
+    {
+        state = BattleState.ENEMYTURN; // Blokujemy przyciski na czas animacji/komunikatu
+
+        // 1. Zapisujemy HP dotychczasowego Pokezaura (jeśli jeszcze żyje)
+        if (activePokezaur != null)
+        {
+            activePokezaur.currentHP = playerUnit.currentHP;
+        }
+
+        // 2. Ustawiamy nowego Pokezaura jako aktywnego
+        activePokezaur = newPokezaur;
+        playerUnit.SetupPlayer(activePokezaur);
+        playerHUD.SetHUD(playerUnit);
+        playerHUD.UpdateTeamUI(playerDataSource.team);
+
+        dialogueText.text = $"Do boju, {activePokezaur.pokeName}!";
+        yield return WaitForInputOrTime(1f);
+
+        // 3. Jeśli to była zmiana wymuszona po śmierci, gracz dostaje swoją turę.
+        // Jeśli dobrowolna w trakcie tury — przechodzimy do tury wroga.
+        if (isForcedSwitch)
+        {
+            isForcedSwitch = false;
+            state = BattleState.PLAYERTURN;
+            PlayerTurn();
+        }
+        else
+        {
+            StartCoroutine(EnemyTurn());
+        }
+    }
+
+    // --- FUNKCJE PRZYCISKÓW AKCJI ---
+
+    public void OnAttackButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+        StartCoroutine(PlayerAttack());
+    }
+
+    public void OnHealButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+        StartCoroutine(PlayerHeal());
+    }
+
+    public void OnPotionButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+
+        ItemData potionToUse = null;
+        foreach (InventorySlot slot in playerDataSource.inventory)
+        {
+            if (slot.item.itemType == ItemType.HealHP)
+            {
+                potionToUse = slot.item;
+                break;
+            }
+        }
+
+        if (potionToUse != null)
+        {
+            StartCoroutine(UseItemRoutine(potionToUse));
+        }
+        else
+        {
+            dialogueText.text = "Nie masz żadnych mikstur w plecaku!";
+        }
+    }
+
+    public void OnRunButton()
+    {
+        if (state != BattleState.PLAYERTURN) return;
+        StartCoroutine(TryToRun());
+    }
+
+    IEnumerator TryToRun()
+    {
+        state = BattleState.ENEMYTURN;
+        dialogueText.text = "Próbujesz uciec...";
+        yield return WaitForInputOrTime(1f);
+
+        bool success = Random.Range(0, 2) == 0;
+
+        if (success)
+        {
+            dialogueText.text = "Udało się uciec!";
+            yield return WaitForInputOrTime(1f);
+
+            // POPRAWKA: Zapisujemy HP dokładnie tego Pokezaura, który aktualnie walczył
+            if (activePokezaur != null)
+            {
+                activePokezaur.currentHP = playerUnit.currentHP;
+            }
+
+            BattleTransitionManager.isReturningFromBattle = true;
+            BattleTransitionManager.justRanAway = true;
+
+            SceneManager.LoadScene("MapScene");
+        }
+        else
+        {
+            dialogueText.text = "Nie udało się uciec!";
+            yield return WaitForInputOrTime(1f);
+
+            dialogueText.text = "Tracisz turę!";
+            yield return WaitForInputOrTime(1f);
+
+            StartCoroutine(EnemyTurn());
+        }
+    }
+
+    IEnumerator UseItemRoutine(ItemData itemToUse)
+    {
+        state = BattleState.ENEMYTURN;
+
+        playerDataSource.RemoveItem(itemToUse);
+        dialogueText.text = $"Użyto: {itemToUse.itemName}!";
+        yield return WaitForInputOrTime(1f);
+
+        if (itemToUse.itemType == ItemType.CatchItem)
+        {
+            dialogueText.text = "Rzucasz Jajem Pokezaura!";
+            yield return WaitForInputOrTime(1f);
+
+            if (Random.value <= 0.5f)
+            {
+                dialogueText.text = "Udało się! Pokezaur złapany!";
+                yield return WaitForInputOrTime(1.5f);
+
+                // POPRAWKA: Zapisujemy aktualne HP naszego walczącego Pokezaura przed wyjściem na mapę!
+                if (activePokezaur != null)
+                {
+                    activePokezaur.currentHP = playerUnit.currentHP;
+                }
+
+                if (playerDataSource.team.Count < 6)
+                {
+                    Pokezaur newPoke = new Pokezaur(BattleTransitionManager.enemyToFight);
+                    playerDataSource.team.Add(newPoke);
+                    dialogueText.text = $"{newPoke.pokeName} dołącza do drużyny!";
+                }
+                else
+                {
+                    dialogueText.text = "Brak miejsca w drużynie! (System PC wkrótce)";
+                }
+
+                yield return WaitForInputOrTime(1.5f);
+
+                BattleTransitionManager.justRanAway = false;
+                BattleTransitionManager.defeatedEnemies.Add(BattleTransitionManager.currentEnemyID);
+                SceneManager.LoadScene("MapScene");
+                yield break;
+            }
+            else
+            {
+                dialogueText.text = "O nie! Pokezaur się uwolnił!";
+                yield return WaitForInputOrTime(1f);
+            }
+        }
+        else if (itemToUse.itemType == ItemType.HealHP)
+        {
+            playerUnit.Heal(itemToUse.value);
+            playerHUD.SetHP(playerUnit.currentHP);
+
+            // POPRAWKA: Zapisujemy uleczone HP do aktywnie walczącego Pokezaura (a nie sztywno do team[0])
+            if (activePokezaur != null)
+            {
+                activePokezaur.currentHP = playerUnit.currentHP;
+            }
+
+            dialogueText.text = $"+{itemToUse.value} HP!";
+            yield return WaitForInputOrTime(1f);
+        }
+
+        StartCoroutine(EnemyTurn());
+    }
+
+    // --- LOGIKA WALKI ---
+
+    IEnumerator PlayerAttack()
+    {
+        state = BattleState.ENEMYTURN;
+
+        int dmg = playerUnit.CalculateDamage();
+        bool isDead = enemyUnit.TakeDamage(dmg);
+        enemyHUD.SetHP(enemyUnit.currentHP);
+
+        dialogueText.text = "Zadajesz " + dmg + " pkt obrażeń!";
+
+        if (hitSound != null && AudioManager.instance != null)
+        {
+            AudioManager.instance.PlaySFX(hitSound);
+        }
+
+        yield return WaitForInputOrTime(0.5f);
+
+        if (isDead)
+        {
+            state = BattleState.WON;
+            EndBattle();
+        }
+        else
+        {
+            StartCoroutine(EnemyTurn());
+        }
+    }
+
+    IEnumerator PlayerHeal()
+    {
+        state = BattleState.ENEMYTURN;
+
+        int healAmount = (playerUnit.unitLevel * 2) + 6;
+        int minHeal = Mathf.FloorToInt(healAmount * 0.9f);
+        int maxHeal = Mathf.FloorToInt(healAmount * 1.1f);
+        if (minHeal < 1) minHeal = 1;
+
+        int healRandom = Random.Range(minHeal, maxHeal + 1);
+
+        playerUnit.Heal(healRandom);
+        playerHUD.SetHP(playerUnit.currentHP);
+
+        // POPRAWKA: Synchronizujemy HP z obiektem aktywnego Pokezaura
+        if (activePokezaur != null)
+        {
+            activePokezaur.currentHP = playerUnit.currentHP;
+        }
+
+        dialogueText.text = "Odzyskujesz " + healRandom + " HP!";
+        yield return WaitForInputOrTime(0.5f);
+
+        StartCoroutine(EnemyTurn());
+    }
+
+    IEnumerator EnemyTurn()
+    {
+        dialogueText.text = enemyUnit.unitName + " atakuje!";
+        yield return WaitForInputOrTime(0.5f);
+
+        int dmg = enemyUnit.CalculateDamage();
+        bool isDead = playerUnit.TakeDamage(dmg);
+        playerHUD.SetHP(playerUnit.currentHP);
+
+        // Zapisujemy aktualne HP w obiekcie naszego Pokezaura
+        if (activePokezaur != null)
+        {
+            activePokezaur.currentHP = playerUnit.currentHP;
+        }
+
+        dialogueText.text = enemyUnit.unitName + " zadał Ci " + dmg + " obrażeń!";
+        yield return WaitForInputOrTime(0.5f);
+
+        if (isDead)
+        {
+            // Odświeżamy ikonki jajek (jedno jajko staje się szare/martwe)
+            playerHUD.UpdateTeamUI(playerDataSource.team);
+
+            dialogueText.text = $"{activePokezaur.pokeName} pada nieprzytomny!";
+            yield return WaitForInputOrTime(1.5f);
+
+            // Sprawdzamy, czy mamy jeszcze jakiegokolwiek żywego Pokezaura w drużynie
+            Pokezaur nextAlive = GetFirstAlivePokezaur();
+
+            if (nextAlive != null)
+            {
+                // Jeśli mamy podpięty panel wyboru drużyny, otwieramy go w trybie wymuszonym
+                if (partySwitchPanel != null)
+                {
+                    dialogueText.text = "Wybierz kolejnego Pokezaura!";
+                    isForcedSwitch = true;
+                    OpenPartySwitchPanel();
+                }
+                else
+                {
+                    // Zabezpieczenie: jeśli nie zbudowałeś jeszcze panelu UI, automatycznie wypuszcza kolejnego żywego!
+                    isForcedSwitch = true;
+                    yield return StartCoroutine(SwitchPokezaurRoutine(nextAlive));
+                }
+            }
+            else
+            {
+                // Dopiero gdy WSZYSTKIE Pokezaury w drużynie mają 0 HP -> przegrywamy walkę
+                state = BattleState.LOST;
+                EndBattle();
+            }
+        }
+        else
+        {
+            state = BattleState.PLAYERTURN;
+            PlayerTurn();
+        }
+    }
+
+    // --- KONIEC WALKI ---
+
+    void EndBattle()
+    {
+        StartCoroutine(EndBattleRoutine());
+    }
+
+    IEnumerator EndBattleRoutine()
+    {
+        if (state == BattleState.WON)
+        {
+            if (AudioManager.instance != null)
+                AudioManager.instance.StopMusic();
+
+            if (victorySound != null && AudioManager.instance != null)
+                AudioManager.instance.PlaySFX(victorySound);
+
+            dialogueText.text = "Wygrałeś walkę!";
+            yield return WaitForInputOrTime(1.5f);
+
+            int xpReward = BattleTransitionManager.enemyToFight.xpReward;
+            int goldReward = BattleTransitionManager.enemyToFight.goldReward;
+            playerDataSource.AddGold(goldReward);
+
+            dialogueText.text = "Zdobywasz " + goldReward + " Złota!";
+            yield return WaitForInputOrTime(1.5f);
+
+            if (activePokezaur != null)
+            {
+                // Najpierw zapisujemy HP, z jakim skończył walkę
+                activePokezaur.currentHP = playerUnit.currentHP;
+
+                dialogueText.text = activePokezaur.pokeName + " zdobywa " + xpReward + " XP!";
+                yield return WaitForInputOrTime(1.5f);
+
+                bool leveledUp = activePokezaur.AddXP(xpReward);
+
+                if (leveledUp)
+                {
+                    // POPRAWKA: Odświeżamy całe playerUnit i HUD (nowe maxHP, nowy level i pełne HP)
+                    playerUnit.SetupPlayer(activePokezaur);
+                    playerHUD.SetHUD(playerUnit);
+
+                    dialogueText.text = "AWANS! Poziom " + activePokezaur.level + "!";
+                    yield return WaitForInputOrTime(1.5f);
+                    dialogueText.text = "Statystyki wzrosły!";
+                    yield return WaitForInputOrTime(1f);
+                }
+            }
+
+            BattleTransitionManager.justRanAway = false;
+            BattleTransitionManager.defeatedEnemies.Add(BattleTransitionManager.currentEnemyID);
+            SceneManager.LoadScene("MapScene");
+        }
+        else if (state == BattleState.LOST)
+        {
+            if (AudioManager.instance != null)
+                AudioManager.instance.StopMusic();
+
+            if (defeatSound != null && AudioManager.instance != null)
+                AudioManager.instance.PlaySFX(defeatSound);
+
+            int lostGold = playerDataSource.LoseGoldOnDeath();
+            dialogueText.text = "Zostałeś pokonany...";
+            yield return WaitForInputOrTime(1f);
+            dialogueText.text = $"Straciłeś {lostGold} sztuk złota.";
+            yield return WaitForInputOrTime(1f);
+
+            BattleTransitionManager.isReturningFromBattle = false;
+
+            if (playerDataSource.team.Count > 0)
+            {
+                foreach (Pokezaur p in playerDataSource.team)
+                {
+                    p.currentHP = p.maxHP;
+                }
+            }
+
+            SceneManager.LoadScene("MapScene");
+        }
+    }
+
+    IEnumerator WaitForInputOrTime(float duration)
+    {
+        float timer = 0f;
+        while (timer < duration)
+        {
+            if (Input.GetMouseButtonDown(0) || Input.GetKeyDown(KeyCode.Space))
+            {
+                yield break;
+            }
+            timer += Time.deltaTime;
+            yield return null;
+        }
+    }
+}
+=== PLIK: BattleTransitionManager.cs ===
+using System.Collections.Generic;
+using UnityEngine;
+
+public static class BattleTransitionManager
+{
+    //WALKA
+    public static EnemyData enemyToFight;
+
+    // NOWE: Tu zapiszemy pozycję gracza
+    public static Vector3 lastPlayerPosition;
+
+    // NOWE: Przełącznik, czy wracamy z walki
+    public static bool isReturningFromBattle = false;
+
+    public static bool justRanAway = false; // Czy uciekliśmy z ostatniej walki?
+
+    // NOWE: ID przeciwnika, z którym aktualnie walczymy
+    public static string currentEnemyID;
+
+    // --- NOWOŚĆ: Stan wysokości ---
+    public static bool isOnElevation = false;
+
+    // NOWE: Lista pokonanych przeciwników (baza danych "trupów")
+    public static List<string> defeatedEnemies = new List<string>();
+
+    //DRZWI
+    // NOWE: Pozycja, w której gracz ma się pojawić po zmianie sceny
+    public static Vector3 targetSpawnPosition;
+
+    public static bool spawnPositionActive = false;
+}
+=== PLIK: BattleUnit.cs ===
+using UnityEngine;
+using UnityEngine.UI; // Jeśli używasz UI nad głowami
+
+public class BattleUnit : MonoBehaviour
+{
+    // Pola na statystyki lokalne w czasie walki
+    public string unitName;
+    public int damage;
+    public int maxHP;
+    public int defense;
+    public int unitLevel;
+    public int currentHP;
+
+    // Odniesienie do SpriteRenderer, żeby zmienić obrazek
+    public SpriteRenderer mySpriteRenderer;
+
+    // Funkcja do ustawiania przeciwnika (z danych EnemyData)
+    public void SetupEnemy(EnemyData enemyData)
+    {
+        unitName = enemyData.enemyName;
+        maxHP = enemyData.maxHealth;
+        currentHP = enemyData.maxHealth; // Przeciwnik zawsze zaczyna z pełnym życiem
+        damage = enemyData.attackPower;
+        unitLevel = enemyData.unitLevel;
+        defense = enemyData.defense;
+
+        // Ustawiamy grafikę potwora
+        mySpriteRenderer.sprite = enemyData.battleSprite;
+    }
+
+    // Funkcja do ustawiania gracza (z danych PlayerData)
+    public void SetupPlayer(Pokezaur myPokezaur)
+    {
+        unitName = myPokezaur.pokeName;
+        unitLevel = myPokezaur.level;
+        maxHP = myPokezaur.maxHP;
+        damage = myPokezaur.damage;
+        defense = myPokezaur.defense;
+        currentHP = myPokezaur.currentHP;
+
+        mySpriteRenderer.sprite = myPokezaur.backSprite != null ? myPokezaur.backSprite : myPokezaur.sprite;
+    }
+
+    // Metoda zwraca 'true', jeśli jednostka umarła
+    public bool TakeDamage(int rawDamage)
+    {
+        // Redukujemy obrażenia o obronę
+        int actualDamage = rawDamage - defense/2;
+
+        // Zabezpieczenie: Żeby atak nie leczył (jeśli obrona jest wyższa niż atak)
+        // Zawsze zadajemy minimum 1 obrażenia (chyba że chcesz całkowitą odporność)
+        if (actualDamage < 1) actualDamage = 1;
+
+        currentHP -= actualDamage;
+
+        if (currentHP <= 0)
+        {
+            currentHP = 0;
+            return true;
+        }
+        return false;
+    }
+
+    public void Heal(int amount)
+    {
+        currentHP += amount;
+        if (currentHP > maxHP)
+        {
+            currentHP = maxHP; // Nie można mieć więcej niż max życia
+        }
+    }
+
+    // Nowa funkcja do losowania siły ataku
+    public int CalculateDamage()
+    {
+        // Przykład: Obrażenia mogą być o 2 mniejsze lub o 2 większe od bazy
+        // Jeśli damage = 10, wylosuje liczbę z przedziału 8-12
+        int minDmg = Mathf.FloorToInt(damage * 0.9f);
+        int maxDmg = Mathf.FloorToInt(damage * 1.1f);
+
+        // Zabezpieczenie: żeby nie zadać 0 lub ujemnych obrażeń
+        if (minDmg < 1) minDmg = 1;
+
+        // Random.Range dla int jest ekskluzywne dla górnej granicy, więc dajemy +1
+        return Random.Range(minDmg, maxDmg + 1);
+    }
+}
+=== PLIK: DialogueManager.cs ===
+using UnityEngine;
+using TMPro;
+using System.Collections.Generic; // Potrzebne do Kolejki (Queue)
+
+public class DialogueManager : MonoBehaviour
+{
+    public static DialogueManager instance;
+    public GameObject dialoguePanel; // Przypisz Panel
+    public TextMeshProUGUI nameText; // Przypisz tekst imienia
+    public TextMeshProUGUI dialogueText; // Przypisz tekst treści
+
+    // Kolejka przechowująca zdania do wyświetlenia
+    private Queue<string> sentences;
+
+    // Flaga, żeby wiedzieć, czy dialog trwa (np. żeby zablokować ruch gracza)
+    public bool isDialogueActive = false;
+
+    private void Awake()
+    {
+        // Ustawiamy instancję przy starcie gry
+        if (instance == null)
+        {
+            instance = this;
+        }
+        else
+        {
+            Destroy(gameObject); // Jeśli jakimś cudem są dwa menedżery, niszczymy duplikat
+        }
+    }
+
+    void Start()
+    {
+        sentences = new Queue<string>();
+    }
+
+    public void StartDialogue(string name, string[] lines)
+    {
+        isDialogueActive = true;
+        dialoguePanel.SetActive(true); // Włączamy okienko
+        nameText.text = name;
+
+        sentences.Clear(); // Czyścimy stare zdania
+
+        // Dodajemy nowe zdania do kolejki
+        foreach (string line in lines)
+        {
+            sentences.Enqueue(line);
+        }
+
+        DisplayNextSentence();
+    }
+
+    public void DisplayNextSentence()
+    {
+        // Jeśli skończyły się zdania w kolejce
+        if (sentences.Count == 0)
+        {
+            EndDialogue();
+            return;
+        }
+
+        string sentence = sentences.Dequeue(); // Pobieramy kolejne zdanie
+        dialogueText.text = sentence;
+    }
+
+    void EndDialogue()
+    {
+        isDialogueActive = false;
+        dialoguePanel.SetActive(false); // Chowamy okienko
+    }
+}
+=== PLIK: Elevation_Entry.cs ===
+using UnityEngine;
+
+public class Elevation_Entry : MonoBehaviour
+{
+    public Collider2D[] mountainColliders;
+    public Collider2D[] boundaryColliders;
+
+
+    // TO JEST NOWOďż˝ďż˝:
+    // Funkcja Start uruchamia siďż˝ przy kaďż˝dym zaďż˝adowaniu sceny (rďż˝wnieďż˝ po walce)
+    private void Start()
+    {
+        // Jeďż˝li Manager mďż˝wi, ďż˝e jesteďż˝my na gďż˝rze...
+        if (BattleTransitionManager.isOnElevation)
+        {
+            SetElevationState(true);
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.gameObject.CompareTag("Player"))
+        {
+            // Zapisujemy stan w Managerze
+            BattleTransitionManager.isOnElevation = true;
+
+            SetElevationState(true);
+
+            // Ustawiamy warstwďż˝ wizualnďż˝ gracza (ďż˝eby staďż˝ "nad" trawďż˝)
+            collision.gameObject.GetComponent<SpriteRenderer>().sortingOrder = 10;
+        }
+    }
+
+    // Pomocnicza funkcja, ďż˝eby nie pisaďż˝ tego samego dwa razy
+    void SetElevationState(bool isUp)
+    {
+        // Jeďż˝li jesteďż˝my na gďż˝rze (isUp = true), wyďż˝ďż˝czamy ďż˝ciany (false)
+        // Jeďż˝li jesteďż˝my na dole (isUp = false), wďż˝ďż˝czamy ďż˝ciany (true)
+        foreach (Collider2D collider in mountainColliders)
+        {
+            collider.enabled = !isUp;
+        }
+
+        // Barierki dziaďż˝ajďż˝ odwrotnie do ďż˝cian
+        foreach (Collider2D boundary in boundaryColliders)
+        {
+            boundary.enabled = isUp;
+        }
+    }
+}
+=== PLIK: Elevation_Exit.cs ===
+using UnityEngine;
+
+public class Elevation_Exit : MonoBehaviour
+{
+    public Collider2D[] mountainColliders;
+    public Collider2D[] boundaryColliders;
+
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.gameObject.CompareTag("Player"))
+        {
+            // NOWOďż˝ďż˝: Zapisujemy, ďż˝e zeszliďż˝my na dďż˝
+            BattleTransitionManager.isOnElevation = false;
+
+            foreach (Collider2D collider in mountainColliders)
+            {
+                collider.enabled = true; // Wďż˝ďż˝czamy ďż˝ciany z powrotem
+            }
+            foreach (Collider2D boundary in boundaryColliders)
+            {
+                boundary.enabled = false; // Wyďż˝ďż˝czamy barierki
+            }
+
+            // Resetujemy warstwďż˝ wizualnďż˝
+            collision.gameObject.GetComponent<SpriteRenderer>().sortingOrder = 3;
+        }
+    }
+}
+
+=== PLIK: EnemyData.cs ===
+using UnityEngine;
+
+[CreateAssetMenu(fileName = "New Enemy", menuName = "Pokemon/Enemy")]
+public class EnemyData : ScriptableObject
+{
+
+    [Header("Grafiki w walce")]
+    public Sprite battleSprite; // Przód (dla dzikich wrogów oraz prezentacji w jajku)
+    public Sprite backSprite;   // Tył (gdy stworek jest w Twojej drużynie i walczy)
+
+    public string enemyName;
+    public int maxHealth;
+    public int attackPower;
+    public int unitLevel;
+
+    public int defense; // Obrona: O tyle mniej obrażeń otrzyma
+    public int xpReward; // Nagroda: Tyle XP dostanie gracz za wygraną
+    public int goldReward;
+}
+=== PLIK: EnemyEncounter.cs ===
+using System.Collections; // WAŻNE: Dodane do obsługi Coroutine
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class EnemyEncounter : MonoBehaviour
+{
+    public EnemyData myData;
+    public string uniqueID;
+
+    // NOWE: Flaga bezpieczeństwa
+    private bool canEncounter = false;
+
+    void Start()
+    {
+        // 1. Czy ten wróg już nie żyje?
+        if (BattleTransitionManager.defeatedEnemies.Contains(uniqueID))
+        {
+            Destroy(gameObject);
+            return; // Kończymy, żeby nie odpalać reszty kodu
+        }
+
+        // 2. NOWOŚĆ: Nie atakuj od razu!
+        // Uruchamiamy licznik, który włączy "agresję" dopiero po chwili.
+        StartCoroutine(EnableEncounterAfterDelay());
+    }
+
+    // Ta funkcja czeka, zanim pozwoli na walkę
+    IEnumerator EnableEncounterAfterDelay()
+    {
+        // Czekamy 3 sekundy. To czas dla gracza na zorientowanie się i ruch.
+        yield return new WaitForSeconds(2f);
+
+        canEncounter = true;
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        // NOWE ZABEZPIECZENIE:
+        // Jeśli wróg jeszcze się "nie obudził" (minęło mniej niż 1.5s od załadowania sceny), ignorujemy gracza.
+        if (!canEncounter) return;
+
+        if (other.CompareTag("Player"))
+        {
+            StartBattle(other.gameObject);
+        }
+    }
+
+    void StartBattle(GameObject player)
+    {
+        BattleTransitionManager.enemyToFight = myData;
+        BattleTransitionManager.lastPlayerPosition = player.transform.position;
+        BattleTransitionManager.isReturningFromBattle = true;
+        BattleTransitionManager.currentEnemyID = uniqueID;
+
+        SceneManager.LoadScene("BattleScene");
+    }
+}
+=== PLIK: Enemy_Combat.cs ===
+using UnityEngine;
+
+public class Enemy_combat:MonoBehaviour
+{
+
+    public int enemyHealth=100;
+    public int enemyDamage=10;
+
+
+
+}
+
+=== PLIK: EssentialsLoader.cs ===
+using UnityEngine;
+
+public class EssentialsLoader : MonoBehaviour
+{
+    public GameObject essentialsPrefab;
+
+    void Awake()
+    {
+        // Sprawdzamy czy Szef (GlobalControl) już istnieje w grze
+        if (GlobalControl.instance == null)
+        {
+            // Jeśli nie ma -> Tworzymy go
+            Instantiate(essentialsPrefab);
+            // Nie musimy tu pisać DontDestroyOnLoad, bo GlobalControl sam to zrobi w swoim Awake()
+        }
+    }
+}
+=== PLIK: GameHUD.cs ===
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using UnityEngine.SceneManagement;
+
+public class GameHUD : MonoBehaviour
+{
+    [Header("Źródło Danych")]
+    public PlayerData playerData; // Przeciągnij tu HeroData
+
+    [Header("Elementy UI")]
+    public GameObject hudContainer; // Cały panel (żeby go ukrywać)
+    public Image leadPokeIcon; // Przeciągnij tu obiekt Image z portretem z HUD_Panel
+
+    public TextMeshProUGUI levelText;
+    public Slider hpSlider;
+    public TextMeshProUGUI hpText;
+
+    [Header("Pasek XP")]
+    public Slider xpSlider;
+    public TextMeshProUGUI xpText; // 1. NOWE: Miejsce na tekst XP
+
+    void Update()
+    {
+        // 1. Ukrywanie HUD w Menu i Walce
+        string sceneName = SceneManager.GetActiveScene().name;
+
+        // Jeśli jesteśmy w Menu lub w Walce -> Ukryj HUD
+        if (sceneName == "MainMenu" || sceneName == "BattleScene")
+        {
+            if (hudContainer.activeSelf) hudContainer.SetActive(false);
+            return; // Nie aktualizuj reszty, szkoda mocy
+        }
+        else
+        {
+            // Jesteśmy na mapie -> Pokaż HUD
+            if (!hudContainer.activeSelf) hudContainer.SetActive(true);
+        }
+
+        // 2. Aktualizacja Wartości (Live)
+        UpdateStats();
+    }
+
+    void UpdateStats()
+    {
+        // POPRAWKA: Pobieramy dane z pierwszego Pokezaura w drużynie, jeśli istnieje
+        if (playerData != null && playerData.team != null && playerData.team.Count > 0)
+        {
+            Pokezaur leadPoke = playerData.team[0];
+
+            if (leadPokeIcon != null && leadPoke.sprite != null)
+            {
+                leadPokeIcon.enabled = true;
+                leadPokeIcon.sprite = leadPoke.sprite;
+            }
+
+            if (levelText != null) levelText.text = "LVL " + leadPoke.level;
+
+            if (hpSlider != null)
+            {
+                hpSlider.maxValue = leadPoke.maxHP;
+                hpSlider.value = leadPoke.currentHP;
+            }
+            if (hpText != null) hpText.text = $"{leadPoke.currentHP} / {leadPoke.maxHP}";
+
+            if (xpSlider != null)
+            {
+                xpSlider.maxValue = leadPoke.xpToNextLevel;
+                xpSlider.value = leadPoke.currentXP;
+            }
+            if (xpText != null)
+            {
+                xpText.text = $"{leadPoke.currentXP} / {leadPoke.xpToNextLevel} XP";
+            }
+        }
+        else
+        {
+            // Jeśli nie ma drużyny, czyścimy HUD lub ustawiamy wartości domyślne
+            if (levelText != null) levelText.text = "LVL 0";
+            if (hpSlider != null) { hpSlider.value = 0; hpSlider.maxValue = 1; }
+            if (hpText != null) hpText.text = "0 / 0";
+            if (xpSlider != null) { xpSlider.value = 0; xpSlider.maxValue = 1; }
+            if (xpText != null) xpText.text = "0 / 0 XP";
+            if (leadPokeIcon != null) leadPokeIcon.enabled = false;
+        }
+    }
+
+    private void OnEnable()
+    {
+        // Nasłuchuj zmiany sceny
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        // Przestań nasłuchiwać (żeby nie było błędów przy wyłączaniu gry)
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    // Ta funkcja odpali się AUTOMATYCZNIE raz, od razu po wejściu do nowej sceny
+    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        // Sprawdzamy nazwę (upewnij się co do pisowni!)
+        if (scene.name == "MainMenu" || scene.name == "BattleScene")
+        {
+            if (hudContainer != null)
+                hudContainer.SetActive(false); // WYŁĄCZ GO NATYCHMIAST
+        }
+        else
+        {
+            if (hudContainer != null)
+                hudContainer.SetActive(true); // WŁĄCZ NA MAPIE
+        }
+    }
+}
+=== PLIK: GameNotifications.cs ===
+using UnityEngine;
+using TMPro;
+using System.Collections;
+
+public class GameNotifications : MonoBehaviour
+{
+    public static GameNotifications instance;
+
+    [Header("UI Elements")]
+    public GameObject messagePanel; // Tło komunikatu
+    public TextMeshProUGUI messageText; // Sam tekst
+
+    [Header("Ustawienia")]
+    public float defaultDuration = 2f; // Ile czasu wisi komunikat
+
+    private Coroutine currentCoroutine;
+
+    void Awake()
+    {
+        // Robimy Singletona, żeby łatwo się odwoływać: GameNotifications.instance.Show(...)
+        if (instance == null) instance = this;
+        else Destroy(gameObject);
+
+        // Na start ukrywamy panel
+        if (messagePanel != null) messagePanel.SetActive(false);
+    }
+
+    // Funkcja do wywoływania komunikatów
+    public void ShowMessage(string text, float duration = 2f)
+    {
+        if (messagePanel == null) return;
+
+        messagePanel.SetActive(true);
+        messageText.text = text;
+
+        // Jeśli już coś się wyświetla, przerywamy odliczanie i zaczynamy nowe
+        if (currentCoroutine != null) StopCoroutine(currentCoroutine);
+        currentCoroutine = StartCoroutine(HideAfterTime(duration));
+    }
+
+    IEnumerator HideAfterTime(float time)
+    {
+        yield return new WaitForSeconds(time);
+        messagePanel.SetActive(false);
+    }
+}
+=== PLIK: GlobalControl.cs ===
+using UnityEngine;
+
+public class GlobalControl : MonoBehaviour
+{
+    // Statyczna zmienna - "Wizytówka" jedynego prawowitego Essentials
+    public static GlobalControl instance;
+
+    void Awake()
+    {
+        // 1. Sprawdzamy, czy "Szef" już istnieje
+        if (instance != null)
+        {
+            // Jeśli Szef już jest, a ja właśnie powstałem -> jestem niepotrzebnym klonem.
+            // Zniszcz mnie natychmiast, zanim zdążę cokolwiek zepsuć/wyświetlić.
+            Destroy(gameObject);
+            return;
+        }
+
+        // 2. Jeśli Szefa nie ma -> Ja zostaję Szefem.
+        instance = this;
+
+        // 3. I nie pozwól mnie zniszczyć przy zmianie sceny
+        DontDestroyOnLoad(gameObject);
+    }
+}
+=== PLIK: HealerNPC.cs ===
+using UnityEngine;
+
+public class HealerNPC : MonoBehaviour
+{
+    [Header("Konfiguracja NPC")]
+    public string npcName = "Pani Doktor";
+
+    [Header("Cennik i Dialogi")]
+    public int healCost = 50; // Ile kosztuje leczenie
+
+    [TextArea] public string[] successLines; // Dialog gdy zapłacimy i uleczy
+    [TextArea] public string[] noMoneyLines; // Dialog gdy nie mamy kasy
+    [TextArea] public string[] fullHpLines;  // Dialog gdy jesteśmy już zdrowi (opcjonalne)
+
+    [Header("Dane")]
+    public PlayerData playerStats;
+
+    [Header("Dźwięki")]
+    public AudioClip healSound;
+    public AudioClip errorSound; // Dźwięk błędu (opcjonalnie)
+
+    private bool isPlayerClose;
+
+    void Update()
+    {
+        if (isPlayerClose && Input.GetKeyDown(KeyCode.E))
+        {
+            // 1. Jeśli dialog nie trwa -> Próbujemy uleczyć
+            if (!DialogueManager.instance.isDialogueActive)
+            {
+                TryToHeal(); // Zmieniamy nazwę funkcji na "Spróbuj Uleczyć"
+            }
+            // 2. Jeśli trwa -> przewijaj tekst
+            else
+            {
+                DialogueManager.instance.DisplayNextSentence();
+            }
+        }
+    }
+
+    void TryToHeal()
+    {
+        if (playerStats.team.Count == 0) return;
+
+        // KROK 1: Sprawdź czy jakikolwiek z 6 stworków wymaga leczenia
+        bool needsHealing = false;
+        foreach (Pokezaur poke in playerStats.team)
+        {
+            if (poke.currentHP < poke.maxHP) needsHealing = true;
+        }
+
+        if (!needsHealing)
+        {
+            DialogueManager.instance.StartDialogue(npcName, fullHpLines);
+            return;
+        }
+
+        // KROK 2: Próba zakupu
+        if (playerStats.SpendGold(healCost))
+        {
+            // --- SUKCES (Mamy kasę) ---
+            // Leczymy CAŁĄ DRUŻYNĘ
+            foreach (Pokezaur poke in playerStats.team)
+            {
+                poke.currentHP = poke.maxHP;
+            }
+
+            if (healSound != null && AudioManager.instance != null) AudioManager.instance.PlaySFX(healSound);
+            DialogueManager.instance.StartDialogue(npcName, successLines);
+        }
+        else
+        {
+            // --- PORAŻKA (Brak kasy) ---
+            if (errorSound != null && AudioManager.instance != null) AudioManager.instance.PlaySFX(errorSound);
+            DialogueManager.instance.StartDialogue(npcName, noMoneyLines);
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Player")) isPlayerClose = true;
+    }
+
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        if (other.CompareTag("Player")) isPlayerClose = false;
+    }
+}
+=== PLIK: Interactable.cs ===
+using UnityEngine;
+using System.Collections.Generic;
+using UnityEngine.SceneManagement;
+
+
+#if UNITY_EDITOR
+using UnityEditor; // Potrzebne, żeby Unity zapamiętało zmiany w edytorze
+#endif
+
+public enum InteractionType { Sign, Item, NPC, Shop, Trainer }
+
+public class Interactable : MonoBehaviour
+{
+    [Header("Typ Interakcji")]
+    public InteractionType type;
+
+    [Header("Unikalne ID (Generuje się samo)")]
+    public string itemID; // <-- NOWOŚĆ: Do zapisu stanu zebrania
+
+    [Header("Opis (Dla UI)")]
+    public string objectName;
+
+    [Header("Dla Znaków / NPC")]
+    [TextArea] public string messageContent;
+
+    [Header("Dla Przedmiotów")]
+    public ItemData itemToGive;
+    public PlayerData playerData;
+    public AudioClip interactSound;
+
+    [Header("Dla Sklepu")]
+    public List<ItemData> shopInventory;
+
+    [Header("Dla Trenerów")]
+    public EnemyData enemy;
+    public string battleSceneName = "BattleScene";
+
+    private bool isPlayerInRange = false;
+    private bool justInteracted = false;
+
+    // --- NOWOŚĆ: Sprawdzanie przy starcie ---
+    void Start()
+    {
+        // Jeśli to przedmiot i już go zebraliśmy -> zniszcz go od razu
+        if (type == InteractionType.Item && playerData != null)
+        {
+            if (playerData.CheckIfCollected(itemID))
+            {
+                Destroy(gameObject);
+            }
+        }
+    }
+
+    void Update()
+    {
+        if (isPlayerInRange && !justInteracted && Input.GetKeyDown(KeyCode.E))
+        {
+            PerformAction();
+        }
+    }
+
+    void PerformAction()
+    {
+        // 1. Dźwięk
+        if (interactSound != null && AudioManager.instance != null)
+        {
+            AudioManager.instance.PlaySFX(interactSound);
+        }
+
+        // 2. Logika
+        switch (type)
+        {
+            case InteractionType.Sign:
+                GameNotifications.instance.ShowMessage(messageContent, 4f);
+                break;
+
+            case InteractionType.Item:
+                PickUpItem();
+                break;
+
+            case InteractionType.NPC:
+                // Tu możesz dodać logikę dialogu
+                break;
+            case InteractionType.Shop:
+                if (ShopMenu.instance != null)
+                {
+                    ShopMenu.instance.OpenShop(shopInventory);
+                }
+                break;
+            case InteractionType.Trainer:
+                StartSpecificBattle();
+                break;
+        }
+    }
+
+    void PickUpItem()
+    {
+        if (itemToGive != null && playerData != null)
+        {
+            justInteracted = true;
+
+            // Dodaj do plecaka
+            playerData.AddItem(itemToGive);
+
+            // --- NOWOŚĆ: Oznaczamy jako zebrane w PlayerData ---
+            playerData.MarkAsCollected(itemID);
+
+            // Wyświetl komunikat
+            GameNotifications.instance.ShowMessage($"Podniesiono: {itemToGive.itemName}", 3f);
+
+            Destroy(gameObject);
+        }
+    }
+
+    // --- FIZYKA ---
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            isPlayerInRange = true;
+
+            if (type == InteractionType.Sign)
+            {
+                PerformAction();
+            }
+            else
+            {
+                string prompt = "";
+
+                switch (type)
+                {
+                    case InteractionType.Item:
+                        // Używamy objectName, który automatycznie pobrał się z ItemData
+                        prompt = $"[E] Podnieś: {objectName}";
+                        break;
+                    case InteractionType.NPC:
+                        prompt = $"[E] Rozmawiaj: {objectName}";
+                        break;
+                    case InteractionType.Shop:
+                        prompt = $"[E] Handluj: {objectName}";
+                        break;
+                    case InteractionType.Trainer:
+                        prompt = $"[E] Walcz z {objectName}";
+                        break;
+                }
+
+                if (InteractionUI.instance != null && !justInteracted)
+                    InteractionUI.instance.ShowPrompt(prompt);
+            }
+        }
+    }
+
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            isPlayerInRange = false;
+
+            if (InteractionUI.instance != null && !justInteracted)
+            {
+                InteractionUI.instance.HidePrompt();
+            }
+        }
+    }
+
+    // --- MAGIA AUTOMATYZACJI (Działa w Edytorze) ---
+
+    private void OnValidate()
+    {
+        // 1. Automatyczne ID (jeśli puste)
+        if (string.IsNullOrEmpty(itemID))
+        {
+            itemID = System.Guid.NewGuid().ToString();
+            MarkDirty();
+        }
+
+        // 2. Automatyczna nazwa z ItemData
+        // Jeśli mamy przypisany przedmiot, a nazwa w UI jest inna niż nazwa przedmiotu -> Zaktualizuj
+        if (type == InteractionType.Item && itemToGive != null)
+        {
+            if (objectName != itemToGive.itemName)
+            {
+                objectName = itemToGive.itemName;
+                MarkDirty();
+            }
+        }
+    }
+
+    // Funkcja pomocnicza do zapisu zmian w edytorze
+    private void MarkDirty()
+    {
+#if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            UnityEditor.EditorUtility.SetDirty(this);
+        }
+#endif
+    }
+
+    [ContextMenu("Wygeneruj Nowe ID")]
+    private void GenerateNewID()
+    {
+        itemID = System.Guid.NewGuid().ToString();
+        MarkDirty();
+    }
+
+    public void StartSpecificBattle()
+    {
+        // 1. ZABEZPIECZENIE: Sprawdź czy przypisałeś wroga
+        if (enemy == null)
+        {
+            Debug.LogError("Nie przypisano EnemyData w inspektorze!");
+            return;
+        }
+
+        // 2. PRZYGOTOWANIE DANYCH (Wypełniamy "Most")
+        // Przekazujemy wroga, z którym chcemy walczyć
+        BattleTransitionManager.enemyToFight = enemy;
+
+        // Zapamiętujemy pozycję gracza, żeby wrócił w to samo miejsce
+        GameObject player = GameObject.FindGameObjectWithTag("Player"); // Upewnij się, że Gracz ma tag "Player"
+        if (player != null)
+        {
+            BattleTransitionManager.lastPlayerPosition = player.transform.position;
+        }
+
+        // Ustawiamy flagi, że wracamy z walki (żeby nie zresetowało pozycji)
+        BattleTransitionManager.isReturningFromBattle = true;
+        // Opcjonalnie: Jeśli uciekniemy od Bossa, to może nie chcemy go odsuwać jak zwykłego stworka?
+        // Ale na razie zostawmy standardowo:
+        BattleTransitionManager.justRanAway = false;
+
+        // 3. ZAŁADOWANIE SCENY
+        SceneManager.LoadScene(battleSceneName);
+    }
+}
+=== PLIK: InteractionUI.cs ===
+using UnityEngine;
+using TMPro;
+
+public class InteractionUI : MonoBehaviour
+{
+    public static InteractionUI instance;
+
+    [Header("Elementy UI")]
+    public GameObject panel;    // Cały pasek/tło
+    public TextMeshProUGUI promptText; // Tekst np. "Podnieś Miecz [E]"
+
+    void Awake()
+    {
+        if (instance == null) instance = this;
+        else Destroy(gameObject);
+
+        // Na start ukrywamy
+        if (panel != null) panel.SetActive(false);
+    }
+
+    public void ShowPrompt(string message)
+    {
+        panel.SetActive(true);
+        promptText.text = message;
+    }
+
+    public void HidePrompt()
+    {
+        panel.SetActive(false);
+    }
+}
+=== PLIK: ItemData.cs ===
+using UnityEngine;
+using System.Collections.Generic;
+
+// --- DEFINICJE STATYSTYK I TYPÓW ---
+public enum StatType { Strength, Defense, MaxHP, Speed }
+public enum ItemType { HealHP, PermSTR, PermDEF, PermHP, Gold, Equipment, Misc, Consumable, CatchItem } // Uprościłem typy do 3 głównych kategorii
+
+[System.Serializable]
+public class StatModifier
+{
+    public StatType statType;
+    public int amount;
+}
+
+[CreateAssetMenu(fileName = "New Item", menuName = "Pokemon/Item")]
+public class ItemData : ScriptableObject
+{
+    [Header("Wygląd i Opis")]
+    public string itemName;
+    public Sprite icon;
+    [TextArea] public string description;
+
+    [Header("Działanie")]
+    public ItemType itemType;
+
+    public int price = 10;
+
+    // --- DLA POTEK I ZŁOTA (Prosta wartość) ---
+    [Tooltip("Użyj tego dla ilości leczenia lub ilości złota w worku")]
+    public int value;
+
+    // --- DLA EKWIPUNKU (Lista bonusów) ---
+    [Tooltip("Użyj tego TYLKO dla przedmiotów typu Equipment")]
+    public List<StatModifier> modifiers = new List<StatModifier>();
+}
+=== PLIK: LabDoorBlocker.cs ===
+using UnityEngine;
+
+public class LabDoorBlocker : MonoBehaviour
+{
+    public PlayerData playerData;
+
+    void Update()
+    {
+        // Jeśli gracz ma już Pokezaura w drużynie, blokada "wyparowuje"
+        if (playerData.team.Count > 0)
+        {
+            gameObject.SetActive(false);
+        }
+    }
+
+    // Blokada używa Collision, więc jest fizyczną ścianą
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.gameObject.CompareTag("Player") && playerData.team.Count == 0)
+        {
+            if (GameNotifications.instance != null)
+            {
+                GameNotifications.instance.ShowMessage("Prof. Kasztan: Hej! Zanim wyruszysz, musisz wybrać swojego partnera!", 4f);
+            }
+        }
+    }
+}
+=== PLIK: MainMenu.cs ===
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+public class MainMenu : MonoBehaviour
+{
+    public string firstLevelName = "MapScene"; // Nazwa pierwszej sceny gry
+    public PlayerData playerData; // Przypisz tutaj ScriptableObject gracza
+
+    // Dane startowe (do resetu przy Nowej Grze)
+    [Header("Wartości domyślne dla Nowej Gry")]
+    public int startLevel = 1;
+    public int startMaxHP = 20;
+    public int startDamage = 5;
+    public int startDefense = 2;
+
+    [Header("Panele UI")]
+    public GameObject mainButtonsPanel;
+    public GameObject authorsPanel;
+    public GameObject optionsPanel;
+
+    [Header("Opcje Audio")]
+    public Slider musicSlider; 
+    public Slider sfxSlider;
+
+    [Header("Referencje")]
+    public Toggle propagandaToggle;
+
+    public void NewGame()
+    {
+        // 1. Reset statystyk (Bez zmian)
+        playerData.team.Clear(); // WAŻNE: Pusta drużyna na start
+        playerData.inventory.Clear();
+        playerData.collectedItemIDs.Clear();
+        playerData.currentGold = 0;
+        playerData.currentEquippedItem = null;
+        playerData.moveSpeed = 5f;
+
+        // 2. Reset managerów (Bez zmian)
+        BattleTransitionManager.defeatedEnemies.Clear();
+        BattleTransitionManager.isReturningFromBattle = false; // To ważne! Nie wracamy z walki.
+
+
+        BattleTransitionManager.targetSpawnPosition = new Vector3(0f, 0f, 0f);
+
+        // Włączamy flagę: "Hej, po załadowaniu mapy przesuń gracza na pozycję targetSpawnPosition"
+        BattleTransitionManager.spawnPositionActive = true;
+        // ----------------------------------------
+
+        // 3. Ładuj mapę
+        SceneManager.LoadScene(firstLevelName);
+    }
+
+    public void LoadGame()
+    {
+
+        SaveManager manager = FindFirstObjectByType<SaveManager>();
+        if (manager != null)
+        {
+            manager.LoadGame();
+        }
+        else
+        {
+            Debug.LogError("Nie znaleziono SaveManagera! Upewnij się, że obiekt Essentials jest na scenie.");
+        }
+    }
+
+    public void QuitGame()
+    {
+        Debug.Log("Wychodzenie z gry...");
+        Application.Quit();
+    }
+
+    public void OpenAuthors()
+    {
+        mainButtonsPanel.SetActive(false);
+        authorsPanel.SetActive(true);
+    }
+
+    public void OpenOptions()
+    {
+        mainButtonsPanel.SetActive(false);
+        optionsPanel.SetActive(true);
+    }
+
+    public void BackToMenu()
+    {
+        authorsPanel.SetActive(false);
+        optionsPanel.SetActive(false);
+        mainButtonsPanel.SetActive(true);
+    }
+
+    void Start()
+    {
+        BackToMenu();
+        // 1. Sprawdzamy czy Manager w ogóle istnieje (bezpiecznik)
+        if (AudioManager.instance != null)
+        {
+            // --- OBSŁUGA MUZYKI ---
+            if (musicSlider != null)
+            {
+                // ZMIANA: Pobieramy zapamiętaną wartość z Managera
+                musicSlider.value = AudioManager.instance.GetMusicVolume();
+
+                // Podpinamy nasłuchiwanie zmian
+                musicSlider.onValueChanged.AddListener((val) =>
+                {
+                    AudioManager.instance.SetMusicVolume(val);
+                });
+            }
+
+            // --- OBSŁUGA EFEKTÓW ---
+            if (sfxSlider != null)
+            {
+                // ZMIANA: Pobieramy zapamiętaną wartość z Managera
+                sfxSlider.value = AudioManager.instance.GetSFXVolume();
+
+                // Podpinamy nasłuchiwanie zmian
+                sfxSlider.onValueChanged.AddListener((val) =>
+                {
+                    AudioManager.instance.SetSFXVolume(val);
+                });
+            }
+        }
+        bool isPropagandaActive = PlayerPrefs.GetInt("SocialCreditOption", 0) == 1;
+
+        // Aktualizujemy PlayerData
+        playerData.allowChinesePropaganda = isPropagandaActive;
+
+        // Aktualizujemy wizualnie Toggle (żeby ptaszek się zgadzał)
+        if (propagandaToggle != null)
+        {
+            propagandaToggle.isOn = isPropagandaActive;
+        }
+    }
+    public void SetPropaganda(bool isSwitched)
+    {
+        // 1. Zmieniamy wartość w danych gry
+        playerData.allowChinesePropaganda = isSwitched;
+
+        // 2. Zapisujemy to na dysku (żeby po restarcie gry pamiętało)
+        // PlayerPrefs nie obsługuje bool, więc zamieniamy na int (1 = prawda, 0 = fałsz)
+        PlayerPrefs.SetInt("SocialCreditOption", isSwitched ? 1 : 0);
+        PlayerPrefs.Save();
+
+        // Opcjonalnie: Śmieszny log
+        if (isSwitched) Debug.Log("Obywatel podjął słuszną decyzję.");
+    }
+}
+=== PLIK: NPCInteraction.cs ===
+using UnityEngine;
+
+public class NPCInteraction : MonoBehaviour
+{
+    public string npcName; // Imię postaci (wpisz w Unity)
+
+    [TextArea(3, 10)] // To sprawi, że w Unity będziesz miał duże pole do pisania
+    public string[] dialogueLines; // Lista zdań tego NPC
+
+    private bool isPlayerClose;
+    private DialogueManager manager;
+
+    void Start()
+    {
+        // Znajdujemy menedżera na scenie automatycznie
+        manager = Object.FindFirstObjectByType<DialogueManager>();
+    }
+
+    void Update()
+    {
+        if (isPlayerClose && Input.GetKeyDown(KeyCode.E))
+        {
+            // Tutaj też używamy instance zamiast zmiennej 'manager'
+            if (!DialogueManager.instance.isDialogueActive)
+            {
+                DialogueManager.instance.StartDialogue(npcName, dialogueLines);
+            }
+            else
+            {
+                DialogueManager.instance.DisplayNextSentence();
+            }
+        }
+    }
+
+    // Wykrywanie wejścia gracza w strefę
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            isPlayerClose = true;
+        }
+    }
+
+    // Wykrywanie wyjścia gracza
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            isPlayerClose = false;
+            // Opcjonalnie: Zamknij dialog, jak gracz odejdzie w trakcie rozmowy
+            // manager.EndDialogue(); 
+        }
+    }
+}
+=== PLIK: PauseMenu.cs ===
+// --- PLIK: PauseMenu.cs ---
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class PauseMenu : MonoBehaviour
+{
+    public static PauseMenu instance;
+    public GameObject pauseMenuUI; // Przypisz cały Panel menu pauzy
+    public static bool GameIsPaused = false;
+
+    void Update()
+    {
+        // 1. Blokada pauzy w menu głównym i podczas walki (Twoja logika)
+        string currentScene = SceneManager.GetActiveScene().name;
+        if (currentScene == "BattleScene" || currentScene == "MainMenu") return;
+
+        // 2. Obsługa klawisza ESC
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (ShopMenu.instance != null && ShopMenu.instance.isShopOpen)
+            {
+                ShopMenu.instance.CloseShop();
+                return; 
+            }
+
+            if (StatsMenu.instance != null && StatsMenu.instance.isMenuOpen)
+            {
+                StatsMenu.instance.CloseMenu();
+                return;
+            }
+
+            if (GameIsPaused)
+            {
+                Resume();
+            }
+            else
+            {
+                Pause();
+            }
+        }
+    }
+
+    private void Awake()
+    {
+        // Ustawiamy instancję przy starcie
+        if (instance == null)
+        {
+            instance = this;
+        }
+        else
+        {
+            Destroy(gameObject); // Zabezpieczenie przed dublowaniem
+        }
+    }
+
+    public void Resume()
+    {
+        pauseMenuUI.SetActive(false);
+        Time.timeScale = 1f; // Odmrażamy czas
+        GameIsPaused = false;
+    }
+
+    void Pause()
+    {
+        pauseMenuUI.SetActive(true);
+        Time.timeScale = 0f; // Zamrażamy czas (zatrzymuje ruch, fizykę)
+        GameIsPaused = true;
+    }
+
+    public void SaveGameButton()
+    {
+        SaveManager.instance.SaveGame();
+    }
+
+    public void LoadGameButton()
+    {
+        Time.timeScale = 1f; // Ważne: Odmroź czas przed wczytaniem!
+        SaveManager.instance.LoadGame();
+    }
+
+    public void QuitToMain()
+    {
+        Resume();
+
+        SceneManager.LoadScene("MainMenu");
+    }
+}
+=== PLIK: PickupItem.cs ===
+using UnityEngine;
+
+public class PickupItem : MonoBehaviour
+{
+    public ItemData item;         // Jaki przedmiot daje ten obiekt?
+    public PlayerData playerData; // Gdzie go wrzucić? (Twój plik gracza)
+    [Header("Dźwięki")]
+    public AudioClip pickupSound; // Tu wrzucisz fanfary
+
+    // Zmienna prywatna - "Czy gracz stoi wystarczająco blisko?"
+    private bool isPlayerInRange = false;
+
+    void Update()
+    {
+        // Sprawdzamy w każdej klatce:
+        // 1. Czy gracz jest blisko?
+        // 2. Czy wcisnął klawisz E?
+        if (isPlayerInRange && Input.GetKeyDown(KeyCode.E))
+        {
+            PickUp();
+        }
+    }
+
+    void PickUp()
+    {
+        // Logika dodawania do plecaka
+        if (playerData != null && item != null)
+        {
+            playerData.AddItem(item);
+            GameNotifications.instance.ShowMessage($"Podniesiono: {item.itemName}", 5f);
+            if (pickupSound != null && AudioManager.instance != null)
+            {
+                AudioManager.instance.PlaySFX(pickupSound);
+            }
+        }
+
+        // Niszczymy obiekt ze sceny
+        Destroy(gameObject);
+    }
+
+    // --- FIZYKA (Wykrywanie obecności) ---
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            isPlayerInRange = true;
+            GameNotifications.instance.ShowMessage($"{item.itemName}. Naciśnij [E], aby podnieść", 99f); // Długi czas, zniknie przy wyjściu
+        }
+    }
+
+    private void OnTriggerExit2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            isPlayerInRange = false;
+            GameNotifications.instance.ShowMessage("", 0.1f);
+        }
+    }
+}
+=== PLIK: PlayerData.cs ===
+using System.Collections.Generic;
+using UnityEngine;
+
+[System.Serializable]
+public class InventorySlot
+{
+    public ItemData item;
+    public int amount;
+
+    public InventorySlot(ItemData _item, int _amount)
+    {
+        item = _item;
+        amount = _amount;
+    }
+}
+
+[CreateAssetMenu(fileName = "New Player", menuName = "Pokemon/Player")]
+public class PlayerData : ScriptableObject
+{
+    public string unitName;
+
+    [Header("Drużyna (Max 6)")]
+    public List<Pokezaur> team = new List<Pokezaur>();
+
+    [Header("Statystyki Trenera")]
+    public float moveSpeed = 5f;
+    public int currentGold = 0;
+
+
+    [Header("Ustawienia")]
+    public bool allowChinesePropaganda = false;
+
+
+    [Header("Audio")]
+    public AudioClip EQSound;
+    public AudioClip potionSound;
+    public AudioClip consumableSound;
+
+    [Header("Zapis Gry")]
+    public List<string> collectedItemIDs = new List<string>();
+
+    public List<InventorySlot> inventory = new List<InventorySlot>();
+    public ItemData currentEquippedItem; // Zostawiamy dla pierwszego stworka
+
+    public bool CheckIfCollected(string id) { return collectedItemIDs.Contains(id); }
+    public void MarkAsCollected(string id) { if (!collectedItemIDs.Contains(id)) collectedItemIDs.Add(id); }
+
+    public void AddItem(ItemData itemToAdd)
+    {
+        foreach (InventorySlot slot in inventory)
+        {
+            if (slot.item == itemToAdd)
+            {
+                slot.amount++;
+                return;
+            }
+        }
+        inventory.Add(new InventorySlot(itemToAdd, 1));
+    }
+
+    public void RemoveItem(ItemData itemToRemove)
+    {
+        foreach (InventorySlot slot in inventory)
+        {
+            if (slot.item == itemToRemove)
+            {
+                slot.amount--;
+                if (slot.amount <= 0) inventory.Remove(slot);
+                return;
+            }
+        }
+    }
+
+    public void AddGold(int amount) { currentGold += amount; }
+
+    public bool SpendGold(int amount)
+    {
+        if (currentGold >= amount) { currentGold -= amount; return true; }
+        return false;
+    }
+
+    public int LoseGoldOnDeath()
+    {
+        int goldToLose = Mathf.FloorToInt(currentGold * 0.25f);
+        currentGold -= goldToLose;
+        if (currentGold < 0) currentGold = 0;
+        return goldToLose;
+    }
+
+    // --- UŻYWANIE PRZEDMIOTÓW (NA LIDERZE DRUŻYNY) ---
+    public void UseItem(ItemData item)
+    {
+        if (team.Count == 0 && item.itemType != ItemType.Gold)
+        {
+            Debug.LogWarning("Brak Pokezaurów w drużynie!");
+            return;
+        }
+
+        Pokezaur leadPoke = (team.Count > 0) ? team[0] : null;
+
+        switch (item.itemType)
+        {
+            case ItemType.HealHP:
+            case ItemType.Consumable:
+                if (leadPoke.currentHP >= leadPoke.maxHP) return;
+                leadPoke.currentHP += item.value;
+                if (leadPoke.currentHP > leadPoke.maxHP) leadPoke.currentHP = leadPoke.maxHP;
+                RemoveItem(item);
+                if (item.itemType == ItemType.HealHP) PlaySound(potionSound);
+                else PlaySound(consumableSound);
+                break;
+
+            case ItemType.Gold:
+                AddGold(item.value);
+                RemoveItem(item);
+                break;
+
+            case ItemType.PermSTR:
+                leadPoke.damage += item.value;
+                RemoveItem(item);
+                PlaySound(potionSound);
+                break;
+
+            case ItemType.PermDEF:
+                leadPoke.defense += item.value;
+                RemoveItem(item);
+                PlaySound(potionSound);
+                break;
+
+            case ItemType.PermHP:
+                leadPoke.maxHP += item.value;
+                leadPoke.currentHP += item.value;
+                RemoveItem(item);
+                PlaySound(potionSound);
+                break;
+
+            case ItemType.Equipment:
+                HandleEquipment(item, leadPoke);
+                PlaySound(EQSound);
+                break;
+        }
+    }
+
+    void PlaySound(AudioClip clip)
+    {
+        if (clip != null && AudioManager.instance != null) AudioManager.instance.PlaySFX(clip);
+    }
+
+    void HandleEquipment(ItemData item, Pokezaur poke)
+    {
+        if (currentEquippedItem == item) UnequipItem(poke);
+        else
+        {
+            if (currentEquippedItem != null) UnequipItem(poke);
+            EquipItem(item, poke);
+        }
+    }
+
+    void EquipItem(ItemData item, Pokezaur poke)
+    {
+        currentEquippedItem = item;
+        foreach (StatModifier mod in item.modifiers)
+        {
+            switch (mod.statType)
+            {
+                case StatType.Strength: poke.damage += mod.amount; break;
+                case StatType.Defense: poke.defense += mod.amount; break;
+                case StatType.MaxHP: poke.maxHP += mod.amount; poke.currentHP += mod.amount; break;
+                case StatType.Speed: moveSpeed += mod.amount; break; // Speed zostaje dla trenera
+            }
+        }
+    }
+
+    void UnequipItem(Pokezaur poke)
+    {
+        if (currentEquippedItem != null)
+        {
+            foreach (StatModifier mod in currentEquippedItem.modifiers)
+            {
+                switch (mod.statType)
+                {
+                    case StatType.Strength: poke.damage -= mod.amount; break;
+                    case StatType.Defense: poke.defense -= mod.amount; break;
+                    case StatType.MaxHP:
+                        poke.maxHP -= mod.amount;
+                        if (poke.currentHP > poke.maxHP) poke.currentHP = poke.maxHP;
+                        break;
+                    case StatType.Speed: moveSpeed -= mod.amount; break;
+                }
+            }
+            currentEquippedItem = null;
+        }
+    }
+}
+=== PLIK: PlayerHealth.cs ===
+using UnityEngine;
+
+
+public class PlayerHealth:MonoBehaviour
+{
+    public int currentHealth;
+    public int maxHealth = 100;
+
+    public PlayerHealth(int currentHealth, int maxHealth)
+    {
+        this.currentHealth = currentHealth;
+        this.maxHealth = maxHealth;
+    }
+
+
+    public void ChangeHealth(int amount)
+    {
+        currentHealth += amount;
+
+        if (currentHealth <= 0)
+        {
+            Die();
+            gameObject.SetActive(false);
+        }
+    }
+
+    public void Die()
+    {
+        currentHealth = 0;
+        Debug.Log("Player has died.");
+    }
+}
+
+=== PLIK: PlayerMovement.cs ===
+using UnityEngine;
+using UnityEngine.SceneManagement; // Do wykrywania zmiany sceny
+using UnityEngine.Tilemaps; // Do obsługi Tilemapy
+
+public class PlayerMovement : MonoBehaviour
+{
+    [Header("Dane Gracza")]
+    public PlayerData playerData;
+
+    [Header("Ustawienia Ruchu")]
+    public Rigidbody2D rb;
+    public Animator anim;
+
+    [Header("Ustawienia Walki")]
+    [SerializeField] private Tilemap grassTilemap;
+    public int encounterChance = 400;
+    public EnemyData[] potentialEnemies;
+    public string battleSceneName = "BattleScene";
+
+    // --- NOWE ZMIENNE: System Kroków ---
+    [Header("System Kroków")]
+    public float stepLength = 1.5f; // Jaką odległość trzeba przejść, żeby był "rzut kostką"
+    private float currentStepTracker = 0f; // Licznik przebytego dystansu
+    // -----------------------------------
+
+    [Header("Audio")]
+    public AudioClip stepSound;   // Tu przeciągniesz plik dźwiękowy
+    public float stepRate = 0.4f; // Co ile sekund słychać krok (im mniej, tym szybciej tupie)
+    private float nextStepTime = 0f; // Licznik wewnętrzny
+
+    private Vector2 movement;
+    private bool isMoving;
+
+    // --- NOWE: Automatyczne szukanie trawy po zmianie sceny ---
+    private void OnEnable()
+    {
+
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    // Ta funkcja odpala się za każdym razem, gdy wchodzisz na nową mapę
+    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        // 1. OCHRONA PRZED WALKĄ: Jeśli to scena walki, gracz idzie spać
+        if (scene.name == "BattleScene" || scene.name == "MainMenu") // Upewnij się, że nazwa sceny jest identyczna jak w Unity!
+        {
+            // Wyłączamy logikę, żeby nie psuła flag
+            GetComponent<SpriteRenderer>().enabled = false; // Zniknij
+            if (rb != null) rb.simulated = false; // Wyłącz fizykę
+
+            // WAŻNE: Przerywamy funkcję (return). 
+            // Dzięki temu kod poniżej się NIE wykona w scenie walki.
+            return;
+        }
+        else
+        {
+            // Jeśli to mapa - włączamy gracza
+            GetComponent<SpriteRenderer>().enabled = true;
+            if (rb != null) rb.simulated = true;
+        }
+
+        // 2. LOGIKA MAPY (Wykonuje się TYLKO jeśli to NIE jest BattleScene)
+        GameObject grassObj = GameObject.Find("Enemy_Grass");
+        if (grassObj != null)
+        {
+            grassTilemap = grassObj.GetComponent<Tilemap>();
+        }
+
+        if (BattleTransitionManager.isReturningFromBattle)
+        {
+            transform.position = BattleTransitionManager.lastPlayerPosition;
+
+            // --- NOWOŚĆ: Przywracanie warstwy wizualnej ---
+            if (BattleTransitionManager.isOnElevation)
+            {
+                GetComponent<SpriteRenderer>().sortingOrder = 10;
+            }
+            else
+            {
+                GetComponent<SpriteRenderer>().sortingOrder = 3; // lub Twoja domyślna wartość
+            }
+            // ----------------------------------------------
+
+            // Logika ochrony
+            if (BattleTransitionManager.justRanAway)
+            {
+                currentStepTracker = -6f;
+            }
+
+            // Resetujemy flagi DOPIERO PO powrocie na mapę
+            BattleTransitionManager.justRanAway = false;
+            BattleTransitionManager.isReturningFromBattle = false;
+        }
+    }
+
+
+    void Update()
+    {
+        // 1. BLOKADA DIALOGU
+        if (DialogueManager.instance != null && DialogueManager.instance.isDialogueActive)
+        {
+            rb.linearVelocity = Vector2.zero; // Zatrzymanie fizyki
+            anim.SetFloat("Speed", 0);
+            return; // Nic więcej nie robimy
+        }
+
+        // 2. ODCZYT KLAWISZY
+        movement.x = Input.GetAxisRaw("Horizontal");
+        movement.y = Input.GetAxisRaw("Vertical");
+
+        // 3. SPRAWDZENIE CZY SIĘ RUSZAMY
+        if (movement.sqrMagnitude > 0.01f)
+        {
+            isMoving = true;
+
+            // Animacje
+            anim.SetFloat("Horizontal", movement.x);
+            anim.SetFloat("Vertical", movement.y);
+            anim.SetFloat("Speed", 1);
+
+            // --- A. LICZENIE KROKÓW DO WALKI (Z nową prędkością!) ---
+            // TU JEST ZMIANA: Mnożymy przez playerData.moveSpeed zamiast lokalnego moveSpeed
+            currentStepTracker += playerData.moveSpeed * Time.deltaTime;
+
+            if (currentStepTracker >= stepLength)
+            {
+                currentStepTracker = 0; // Reset licznika
+                CheckForEncounters();   // Sprawdź czy walka
+            }
+
+            // --- B. DŹWIĘK KROKÓW (TUPANIE) ---
+            if (Time.time >= nextStepTime)
+            {
+                if (stepSound != null && AudioManager.instance != null)
+                {
+                    AudioManager.instance.PlaySFX(stepSound);
+
+                    // Im szybciej biegniesz, tym częściej tupiesz? 
+                    // Możesz zostawić stałe stepRate albo zrobić dynamiczne: stepRate / (playerData.moveSpeed / 5f)
+                    nextStepTime = Time.time + stepRate;
+                }
+            }
+        }
+        else
+        {
+            // Jeśli stoimy w miejscu
+            isMoving = false;
+            anim.SetFloat("Speed", 0);
+        }
+    }
+
+    void FixedUpdate()
+    {
+        rb.linearVelocity = movement.normalized * playerData.moveSpeed;
+    }
+
+    void CheckForEncounters()
+    {
+        if (grassTilemap == null) return;
+
+        Vector3Int gridPosition = grassTilemap.WorldToCell(transform.position);
+
+        if (grassTilemap.HasTile(gridPosition))
+        {
+            int roll = Random.Range(0, 1001);
+
+            if (roll <= encounterChance)
+            {
+                BattleTransitionManager.lastPlayerPosition = transform.position;
+                BattleTransitionManager.isReturningFromBattle = true;
+
+                if (potentialEnemies.Length > 0)
+                {
+                    int randomIndex = Random.Range(0, potentialEnemies.Length);
+                    BattleTransitionManager.enemyToFight = potentialEnemies[randomIndex];
+
+                    movement = Vector2.zero;
+                    if (rb != null) rb.linearVelocity = Vector2.zero;
+                    SceneManager.LoadScene(battleSceneName);
+                }
+            }
+        }
+    }
+}
+=== PLIK: PlayerPositionHandler.cs ===
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using System.Collections; // Potrzebne do Coroutine
+
+public class PlayerPositionHandler : MonoBehaviour
+{
+    void Start()
+    {
+    }
+
+
+    private void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        // Zamiast ustawiać od razu, uruchamiamy opóźnienie
+        StartCoroutine(TeleportAfterFrame());
+    }
+
+    IEnumerator TeleportAfterFrame()
+    {
+        yield return null; // Czekamy klatkę
+
+        int playerCount = FindObjectsOfType<PlayerPositionHandler>().Length;
+
+        if (BattleTransitionManager.spawnPositionActive)
+        {
+            transform.position = BattleTransitionManager.targetSpawnPosition;
+            BattleTransitionManager.spawnPositionActive = false;
+        }
+    }
+}
+=== PLIK: Pokezaur.cs ===
+using UnityEngine;
+
+[System.Serializable] // Musi tu być, żeby działał zapis gry i widok w Inspektorze!
+public class Pokezaur
+{
+    public string pokeName;
+    public int level;
+    public int currentHP;
+    public int maxHP;
+    public int damage;
+    public int defense;
+    public int currentXP;
+    public int xpToNextLevel;
+    public Sprite sprite;     // Przód (ikonka w HUD, menu i dla dzikich wrogów)
+    public Sprite backSprite; // Tył (wyświetlany podczas walki po stronie gracza)
+
+    // Konstruktor do łapania i odbierania startera
+    public Pokezaur(EnemyData wildEnemy)
+    {
+        pokeName = wildEnemy.enemyName;
+        level = wildEnemy.unitLevel;
+        maxHP = wildEnemy.maxHealth;
+        currentHP = wildEnemy.maxHealth;
+        damage = wildEnemy.attackPower;
+        defense = wildEnemy.defense;
+        sprite = wildEnemy.battleSprite;
+        backSprite = wildEnemy.backSprite != null ? wildEnemy.backSprite : wildEnemy.battleSprite;
+
+        currentXP = 0;
+        xpToNextLevel = 100 * level;
+    }
+
+    // Logika awansu przeniesiona z PlayerData
+    public bool AddXP(int amount)
+    {
+        currentXP += amount;
+        bool hasLeveledUp = false;
+
+        while (currentXP >= xpToNextLevel)
+        {
+            LevelUp();
+            hasLeveledUp = true;
+        }
+
+        return hasLeveledUp;
+    }
+
+    private void LevelUp()
+    {
+        level++;
+        currentXP -= xpToNextLevel;
+        xpToNextLevel = Mathf.RoundToInt(xpToNextLevel * 1.5f);
+
+        maxHP += 5;
+        currentHP = maxHP; // Leczenie przy awansie
+        damage += 2;
+        defense += 1;
+
+        Debug.Log($"{pokeName} awansuje na poziom {level}!");
+    }
+}
+=== PLIK: PropagandaSystem.cs ===
+using UnityEngine;
+
+public class PropagandaSystem : MonoBehaviour
+{
+    public PlayerData playerData;
+    public float minTime = 10f;
+    public float maxTime = 30f;
+    private float timer;
+    public AudioClip gongSound;
+    public AudioClip happySound;
+
+    // Lista "dobrych" wiadomości
+    string[] goodMessages = {
+        "+15 Social Credit! Dobra praca Obywatelu!",
+        "+50 Social Credit! Chwała Partii!",
+        "Wielki Brat patrzy z uznaniem. (+20 SC)",
+        "Twoja lojalność została odnotowana.",
+        "Nic się nie wydarzyło na Placu Tiananmen w 1989."
+    };
+
+    // Lista "złych" wiadomości (rzadsze)
+    string[] badMessages = {
+        "-30 Social Credit! Podejrzane zachowanie.",
+        "-100 Social Credit! Deportacja do Korei Północnej nieunikniona.",
+        "Zakaz chodzenia w butach",
+        "Zakaz Kubusia Puchatka!",
+        "Minus jeden talerz ryżu",
+        "Podobno utrzymujesz kontakty z niejakim The Wokiem"
+    };
+
+    void Start()
+    {
+        ResetTimer();
+    }
+
+    void Update()
+    {
+        // Jeśli opcja jest wyłączona - nic nie rób
+        if (!playerData.allowChinesePropaganda) return;
+
+        timer -= Time.deltaTime;
+
+        if (timer <= 0)
+        {
+            TriggerPropaganda();
+            ResetTimer();
+        }
+    }
+
+    void ResetTimer()
+    {
+        timer = Random.Range(minTime, maxTime);
+    }
+
+    void TriggerPropaganda()
+    {
+        bool isGood = Random.value > 0.3f;
+        string message = "";
+
+        if (isGood)
+        {
+            message = goodMessages[Random.Range(0, goodMessages.Length)];
+            if (AudioManager.instance != null) AudioManager.instance.PlaySFX(happySound);
+            if (GameNotifications.instance != null)
+            {
+                GameNotifications.instance.ShowMessage($"{message}", 3f);
+            }
+        }
+
+        else
+        {
+            message = badMessages[Random.Range(0, badMessages.Length)];
+            if (AudioManager.instance != null) AudioManager.instance.PlaySFX(gongSound);
+            if (GameNotifications.instance != null)
+            {
+                GameNotifications.instance.ShowMessage($"<color=red>{message}</color>", 3f);
+            }
+        }
+    }
+}
+=== PLIK: SaveManager.cs ===
+using UnityEngine;
+using System.IO;
+using System.Collections.Generic;
+using UnityEngine.SceneManagement;
+
+// --- KLASY POMOCNICZE DO ZAPISU ---
+
+[System.Serializable]
+public class SavedInventoryItem
+{
+    public string fileName; // Nazwa pliku w folderze Resources
+    public int amount;
+
+    public SavedInventoryItem(string _name, int _amount)
+    {
+        fileName = _name;
+        amount = _amount;
+    }
+}
+
+[System.Serializable]
+public class SaveData
+{
+    // DANE GRACZA I ŚWIAT
+    public int gold;
+    public float[] position;
+    public string currentScene;
+    public List<string> defeatedEnemies;
+    public List<string> collectedItemIDs;
+    public List<string> collectedItems; // <--- DODANE (ID zebranych rzeczy z mapy)
+
+    // --- NOWOŚĆ: Lista Twojej drużyny ---
+    public List<Pokezaur> team;
+
+    // EKWIPUNEK
+    public List<string> itemNames;
+    public List<int> itemCounts;
+
+    public float movementSpeed;
+
+    // EKWIPUNEK
+    public List<SavedInventoryItem> inventory; // <--- ZMIENIONE na listę obiektów
+    public string equippedItemFileName; // <--- DODANE (co mamy założone)
+}
+
+public class SaveManager : MonoBehaviour
+{
+    public static SaveManager instance;
+
+    [Header("Referencje")]
+    public PlayerData playerData;
+
+    [Header("Baza wszystkich gatunków (do odtwarzania grafik po LoadGame)")]
+    public List<EnemyData> allSpeciesDatabase; // Przeciągnij tu w Inspektorze wszystkie swoje pliki EnemyData
+
+    private void Awake()
+    {
+        if (instance == null)
+        {
+            instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    public void SaveGame()
+    {
+        SaveData data = new SaveData();
+
+        // 1. Statystyki
+        data.team = new List<Pokezaur>(playerData.team);
+        data.collectedItemIDs = new List<string>(playerData.collectedItemIDs);
+        data.gold = playerData.currentGold; // Zapisujemy złoto
+        data.movementSpeed = playerData.moveSpeed;
+
+        // 2. Pozycja gracza
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null)
+        {
+            data.position = new float[3];
+            data.position[0] = player.transform.position.x;
+            data.position[1] = player.transform.position.y;
+            data.position[2] = player.transform.position.z;
+        }
+        data.currentScene = SceneManager.GetActiveScene().name;
+
+        // 3. Listy ID (Wrogowie i Przedmioty na mapie)
+        data.defeatedEnemies = new List<string>(BattleTransitionManager.defeatedEnemies);
+        data.collectedItems = new List<string>(playerData.collectedItemIDs); // Zapisujemy co zebraliśmy
+
+        // 4. Ekwipunek (Zapisujemy nazwy PLIKÓW, a nie nazwy wyświetlane)
+        data.inventory = new List<SavedInventoryItem>();
+        foreach (var slot in playerData.inventory)
+        {
+            // slot.item.name to nazwa pliku w projekcie (np. "Potion_Small")
+            // slot.item.itemName to nazwa w grze (np. "Mała Mikstura")
+            // Do wczytywania potrzebujemy nazwy pliku!
+            data.inventory.Add(new SavedInventoryItem(slot.item.name, slot.amount));
+        }
+
+        // 5. Założony przedmiot
+        if (playerData.currentEquippedItem != null)
+        {
+            data.equippedItemFileName = playerData.currentEquippedItem.name;
+        }
+        else
+        {
+            data.equippedItemFileName = "";
+        }
+
+        // 6. Zapis do pliku
+        string json = JsonUtility.ToJson(data);
+        File.WriteAllText(Application.persistentDataPath + "/savefile.json", json);
+
+        GameNotifications.instance.ShowMessage($"Gra zapisana", 3f);
+    }
+
+    public void LoadGame()
+    {
+        string path = Application.persistentDataPath + "/savefile.json";
+        if (File.Exists(path))
+        {
+            string json = File.ReadAllText(path);
+            SaveData data = JsonUtility.FromJson<SaveData>(json);
+
+            // 1. Przywracanie statystyk
+            playerData.team = new List<Pokezaur>(data.team);
+            foreach (Pokezaur poke in playerData.team)
+            {
+                EnemyData species = allSpeciesDatabase.Find(e => e.enemyName == poke.pokeName);
+                if (species != null)
+                {
+                    poke.sprite = species.battleSprite;
+                    poke.backSprite = species.backSprite != null ? species.backSprite : species.battleSprite;
+                }
+            }
+
+            playerData.collectedItemIDs = data.collectedItemIDs;
+            playerData.currentGold = data.gold; // Wczytujemy złoto
+            playerData.moveSpeed = data.movementSpeed;
+
+            // 2. Przywracanie świata
+            BattleTransitionManager.defeatedEnemies = data.defeatedEnemies;
+            playerData.collectedItemIDs = data.collectedItems; // Żeby zebrane itemy nie wróciły
+
+            // 3. Ustawienie flagi teleportacji
+            if (data.position != null && data.position.Length == 3)
+            {
+                BattleTransitionManager.targetSpawnPosition = new Vector3(data.position[0], data.position[1], data.position[2]);
+                BattleTransitionManager.spawnPositionActive = true;
+            }
+
+            // 4. INWENTARZ - WCZYTYWANIE Z RESOURCES
+            playerData.inventory.Clear(); // Czyścimy obecny
+            playerData.currentEquippedItem = null; // Resetujemy EQ
+
+            foreach (SavedInventoryItem savedSlot in data.inventory)
+            {
+                // Szukamy pliku w Assets/Resources/Items/
+                ItemData itemAsset = Resources.Load<ItemData>("Items/" + savedSlot.fileName);
+
+                if (itemAsset != null)
+                {
+                    playerData.inventory.Add(new InventorySlot(itemAsset, savedSlot.amount));
+                }
+                else
+                {
+                    Debug.LogWarning($"Nie znaleziono pliku przedmiotu: {savedSlot.fileName}. Upewnij się, że jest w folderze Resources/Items!");
+                }
+            }
+
+            // 5. PRZYWRACANIE ZAŁOŻONEGO EKWIPUNKU
+            if (!string.IsNullOrEmpty(data.equippedItemFileName))
+            {
+                ItemData equippedItem = Resources.Load<ItemData>("Items/" + data.equippedItemFileName);
+                if (equippedItem != null)
+                {
+                    // Ustawiamy tylko referencję (statystyki wczytaliśmy już w punkcie 1)
+                    playerData.currentEquippedItem = equippedItem;
+                }
+            }
+
+            // 6. Załadowanie sceny
+            SceneManager.LoadScene(data.currentScene);
+            GameNotifications.instance.ShowMessage($"Gra wczytana", 3f);
+        }
+        else
+        {
+            GameNotifications.instance.ShowMessage($"Brak zapisanej gry", 3f);
+        }
+    }
+}
+=== PLIK: SceneMusic.cs ===
+using UnityEngine;
+
+public class SceneMusic : MonoBehaviour
+{
+    [Header("Dane")]
+    public PlayerData playerData; // WAŻNE: Przeciągnij tu plik HeroData!
+
+    [Header("Muzyka dla tej sceny")]
+    public AudioClip normalMusic;       // Muzyka domyślna (np. las)
+    public AudioClip propagandaMusic;   // Muzyka "specjalna" (np. Red Sun in the Sky)
+
+    void Start()
+    {
+        // Bezpiecznik: jeśli nie ma Managera Audio, nie rób nic
+        if (AudioManager.instance == null) return;
+
+        AudioClip trackToPlay = normalMusic; // Domyślnie wybieramy zwykłą
+
+        // --- WARUNEK PROPAGANDY ---
+        // 1. Czy mamy podpięte dane gracza?
+        // 2. Czy gracz zaznaczył "ptaszka" w opcjach?
+        // 3. Czy w ogóle przypisałeś muzykę propagandową do tego pola?
+        if (playerData != null && playerData.allowChinesePropaganda && propagandaMusic != null)
+        {
+            // Jeśli wszystko na TAK -> podmieniamy utwór
+            trackToPlay = propagandaMusic;
+        }
+
+        // --- ODTWARZANIE ---
+        if (trackToPlay != null)
+        {
+            AudioManager.instance.PlayMusic(trackToPlay);
+        }
+    }
+}
+=== PLIK: SceneTeleport.cs ===
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class SceneTeleport : MonoBehaviour
+{
+    [Header("Gdzie przenieść gracza?")]
+    public string sceneToLoad;   // Nazwa sceny (np. "HospitalScene")
+    public Vector2 spawnPoint;   // Koordynaty X, Y w środku budynku
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            // Zapisujemy, gdzie gracz ma wylądować
+            BattleTransitionManager.targetSpawnPosition = spawnPoint;
+            BattleTransitionManager.spawnPositionActive = true;
+
+            // Ładujemy scenę
+            SceneManager.LoadScene(sceneToLoad);
+        }
+    }
+}
+=== PLIK: ShopMenu.cs ===
+using UnityEngine;
+using TMPro;
+using UnityEngine.UI;
+using System.Collections.Generic;
+
+public class ShopMenu : MonoBehaviour
+{
+    public static ShopMenu instance;
+    public bool isShopOpen = false;
+
+    [Header("UI")]
+    public GameObject shopPanel;
+    public Transform shopContainer;   // Kontener po lewej (Towar NPC)
+    public Transform playerContainer; // Kontener po prawej (Twój plecak)
+    public GameObject itemSlotPrefab; // Ten sam prefab co w StatsMenu!
+    public TextMeshProUGUI goldText;  // Wyświetlanie złota gracza
+
+    [Header("Dane")]
+    public PlayerData playerData;
+    public AudioClip shopSound;
+
+    // Lista przedmiotów, które ma AKTUALNY sklepikarz (zmienia się zależnie od NPC)
+    private List<ItemData> currentShopStock;
+
+    private void Awake()
+    {
+        if (instance == null) instance = this;
+    }
+
+    private void Update()
+    {
+        // Zamykanie sklepu klawiszem ESC lub B
+        if (shopPanel.activeSelf)
+        {
+            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.B))
+            {
+                CloseShop();
+            }
+        }
+    }
+
+    // --- OTWIERANIE I ZAMYKANIE ---
+
+    public void OpenShop(List<ItemData> itemsForSale)
+    {
+        currentShopStock = itemsForSale;
+        shopPanel.SetActive(true);
+        isShopOpen = true;
+        Time.timeScale = 0f; // Pauza gry
+
+        // Zamykamy inne menu jeśli są otwarte
+        if (StatsMenu.instance != null) StatsMenu.instance.CloseMenu();
+
+        RefreshUI();
+    }
+
+    public void CloseShop()
+    {
+        shopPanel.SetActive(false);
+        isShopOpen = false;
+        Time.timeScale = 1f;
+    }
+
+    // --- ODŚWIEŻANIE WIDOKU ---
+
+    void RefreshUI()
+    {
+        // 1. Aktualizacja złota
+        if (goldText != null)
+            goldText.text = playerData.currentGold.ToString();
+
+        // 2. Czyścimy stare sloty
+        foreach (Transform child in shopContainer) Destroy(child.gameObject);
+        foreach (Transform child in playerContainer) Destroy(child.gameObject);
+
+        // 3. Rysujemy Sklep (LEWA STRONA) - Kupowanie
+        if (currentShopStock != null)
+        {
+            foreach (ItemData item in currentShopStock)
+            {
+                GameObject slot = Instantiate(itemSlotPrefab, shopContainer);
+                SetupSlot(slot, item, true);
+            }
+        }
+
+        // 4. Rysujemy Gracza (PRAWA STRONA) - Sprzedawanie
+        foreach (InventorySlot slot in playerData.inventory)
+        {
+            GameObject newSlot = Instantiate(itemSlotPrefab, playerContainer);
+
+            // SetupSlot ustawia już cenę ORAZ ilość ("x5 (50 G)")
+            SetupSlot(newSlot, slot.item, false);
+
+        }
+    }
+
+    // Funkcja pomocnicza do ustawiania wyglądu i przycisku
+    void SetupSlot(GameObject slotObj, ItemData item, bool isBuyingMode)
+    {
+        TextMeshProUGUI[] texts = slotObj.GetComponentsInChildren<TextMeshProUGUI>();
+
+        if (isBuyingMode)
+        {
+            // Widok sklepu: Pokaż cenę
+            texts[0].text = item.itemName;
+            if (texts.Length >= 2)
+            {
+                texts[1].text = $"<color=yellow>{item.price} G</color>";
+                // Upewnij się, że czcionka jest wystarczająco mała, np. 14-16pkt
+            }
+        }
+        else
+        {
+            // Widok gracza: Pokaż cenę sprzedaży (np. połowa)
+            texts[0].text = item.itemName;
+            if (texts.Length >= 2)
+            {
+                // Znajdź ilość tego przedmiotu w plecaku
+                InventorySlot slot = playerData.inventory.Find(x => x.item == item);
+                int amount = slot != null ? slot.amount : 0;
+                int sellPrice = item.price / 2;
+
+                // Np.: "x5 (50 G)"
+                texts[1].text = $"x{amount} <color=green>{sellPrice} G</color>";
+            }
+        }
+
+        // Obrazek (jeśli masz ikonki w itemData)
+        // Image icon = slotObj.transform.Find("Icon").GetComponent<Image>();
+        // icon.sprite = item.icon;
+
+        // --- INTERAKCJA ---
+        Button btn = slotObj.GetComponent<Button>();
+        btn.onClick.RemoveAllListeners();
+
+        if (isBuyingMode)
+        {
+            btn.onClick.AddListener(() => BuyItem(item));
+        }
+        else
+        {
+            btn.onClick.AddListener(() => SellItem(item));
+        }
+    }
+
+    // --- LOGIKA TRANSAKCJI ---
+
+    void BuyItem(ItemData item)
+    {
+        if (playerData.currentGold >= item.price)
+        {
+            playerData.currentGold -= item.price;
+            playerData.AddItem(item);
+
+            if (shopSound != null && AudioManager.instance != null)
+            {
+                AudioManager.instance.PlaySFX(shopSound);
+            }
+            GameNotifications.instance.ShowMessage($"Kupiono: {item.itemName}", 3f);
+
+            RefreshUI();
+        }
+        else
+        {
+            GameNotifications.instance.ShowMessage("Brak złota!", 1.5f);
+        }
+    }
+
+    void SellItem(ItemData item)
+    {
+        // Znajdź slot z przedmiotem
+        InventorySlot slot = playerData.inventory.Find(x => x.item == item);
+
+        // --- NOWOŚĆ: ZABEZPIECZENIE PRZED SPRZEDAŻĄ ZAŁOŻONEGO ---
+        if (playerData.currentEquippedItem == item)
+        {
+            // Jeśli to ten przedmiot i mamy go tylko 1 sztukę (czyli tę na sobie)
+            if (slot != null && slot.amount <= 1)
+            {
+                // Wyświetl komunikat (jeśli masz system powiadomień, jak nie to Debug.Log)
+                if (GameNotifications.instance != null)
+                    GameNotifications.instance.ShowMessage("Zdejmij przedmiot przed sprzedażą!", 2f);
+                else
+                    Debug.Log("Nie możesz sprzedać założonego przedmiotu!");
+
+                return; // STOP! Przerywamy funkcję, nic nie sprzedajemy.
+            }
+        }
+        // -----------------------------------------------------------
+
+        if (slot != null)
+        {
+            int sellPrice = item.price / 2;
+            playerData.currentGold += sellPrice;
+
+            playerData.RemoveItem(item);
+
+            if (shopSound != null && AudioManager.instance != null)
+            {
+                AudioManager.instance.PlaySFX(shopSound);
+            }
+            GameNotifications.instance.ShowMessage($"Sprzedano: {item.itemName}", 3f);
+            RefreshUI();
+        }
+    }
+}
+=== PLIK: StarterEgg.cs ===
+using UnityEngine;
+
+public class StarterEgg : MonoBehaviour
+{
+    [Header("Konfiguracja Startera")]
+    public EnemyData starterData;
+    [TextArea(3, 5)]
+    public string professorDescription;
+
+    [Header("Ustawienia Interakcji")]
+    public float interactionDistance = 1.5f;
+
+    // Zmieniliśmy typ zmiennej na Twój konkretny skrypt gracza
+    private PlayerMovement player;
+
+    void Update()
+    {
+        // Pancerne szukanie gracza w każdej klatce, dopóki go nie znajdzie
+        if (player == null)
+        {
+            player = FindObjectOfType<PlayerMovement>();
+
+            // Jeśli gracza nadal nie ma w tej klatce, przerywamy Update i unikamy błędu
+            if (player == null) return;
+        }
+
+        // Obliczamy dystans. 'player.transform.position' jest w 100% bezpieczne.
+        float distance = Vector2.Distance(transform.position, player.transform.position);
+        Debug.Log($"[{gameObject.name}] Dystans do gracza: {distance}");
+
+
+        if (distance <= interactionDistance)
+        {
+            if (GameNotifications.instance != null)
+            {
+                GameNotifications.instance.ShowMessage($"[E] Zbadaj jajko: {starterData.enemyName}", 0.5f);
+            }
+
+            if (Input.GetKeyDown(KeyCode.E))
+            {
+                if (StarterSelectionUI.instance != null && !StarterSelectionUI.instance.panel.activeSelf)
+                {
+                    StarterSelectionUI.instance.OpenPanel(starterData, professorDescription);
+                }
+            }
+        }
+    }
+}
+=== PLIK: StarterSelectionUI.cs ===
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+public class StarterSelectionUI : MonoBehaviour
+{
+    public static StarterSelectionUI instance;
+
+    [Header("Elementy UI")]
+    public GameObject panel;
+    public Image pokeImage;
+    public TextMeshProUGUI descriptionText;
+
+    [Header("Dane")]
+    public PlayerData playerData;
+
+    private EnemyData currentStarterData;
+
+    // Zmienna przechowująca skrypt ruchu gracza, by móc go wyłączyć
+    private PlayerMovement playerMovementRef;
+
+    void Awake()
+    {
+        // Klasyczny Singleton – upewnia się, że to okno jest tylko jedno
+        if (instance == null) instance = this;
+        panel.SetActive(false);
+    }
+
+    void Update()
+    {
+        // Jeśli okno jest widoczne, zamykamy je TYLKO klawiszem Escape (lub przyciskiem na ekranie)
+        if (panel.activeSelf)
+        {
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                ChooseNo();
+            }
+        }
+    }
+
+    public void OpenPanel(EnemyData starterData, string description)
+    {
+        currentStarterData = starterData;
+        pokeImage.sprite = starterData.battleSprite;
+        descriptionText.text = description;
+
+        panel.SetActive(true);
+
+        // Znajdujemy gracza po tagu i unieruchamiamy go.
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null)
+        {
+            playerMovementRef = player.GetComponent<PlayerMovement>();
+            if (playerMovementRef != null)
+            {
+                // To fizycznie dezaktywuje skrypt. Gracz "zamarza".
+                playerMovementRef.enabled = false;
+
+                // Na wypadek, gdyby gracz był akurat w trakcie chodzenia 
+                // i zamarłby w pozycji biegu, zatrzymujemy go.
+                Animator anim = player.GetComponent<Animator>();
+                if (anim != null) anim.SetFloat("Speed", 0);
+
+                Rigidbody2D rb = player.GetComponent<Rigidbody2D>();
+                if (rb != null) rb.linearVelocity = Vector2.zero;
+            }
+        }
+    }
+
+    public void ChooseYes()
+    {
+        // Dodanie Pokezaura do drużyny (struktura listowa).
+        Pokezaur newPoke = new Pokezaur(currentStarterData);
+        playerData.team.Add(newPoke);
+
+        // Opcjonalne powiadomienie.
+        if (GameNotifications.instance != null)
+        {
+            GameNotifications.instance.ShowMessage($"Wybrałeś {newPoke.pokeName}!", 5f);
+        }
+
+        // Sprzątanie po stole – usuwamy wszystkie jajka oznaczone nowym tagiem.
+        GameObject[] eggs = GameObject.FindGameObjectsWithTag("StarterEgg");
+        foreach (GameObject egg in eggs)
+        {
+            Destroy(egg);
+        }
+
+        // Usunięcie blokady ucieczki, jeśli taka jest przed drzwiami
+        GameObject doorBlocker = GameObject.Find("DoorBlocker"); //lub odpowiednia nazwa
+        if (doorBlocker != null)
+        {
+            doorBlocker.SetActive(false);
+        }
+
+
+        ClosePanel();
+    }
+
+    public void ChooseNo()
+    {
+        ClosePanel();
+    }
+
+    private void ClosePanel()
+    {
+        panel.SetActive(false);
+
+        // Zwracamy graczowi możliwość ruchu!
+        if (playerMovementRef != null)
+        {
+            playerMovementRef.enabled = true;
+        }
+    }
+}
+=== PLIK: StatsMenu.cs ===
+using UnityEngine;
+using TMPro;
+using UnityEngine.UI;
+using System.Collections.Generic;
+using UnityEngine.SceneManagement;
+
+public class StatsMenu : MonoBehaviour
+{
+    public static StatsMenu instance;
+
+    [Header("Główne")]
+    public GameObject menuPanel;
+    public PlayerData playerData;
+
+    [Header("Statystyki (Teksty)")]
+    public TextMeshProUGUI nameText;
+    public TextMeshProUGUI levelText;
+    public TextMeshProUGUI hpText;
+    public TextMeshProUGUI xpText;
+    public TextMeshProUGUI AttackText;
+    public TextMeshProUGUI DefText;
+    public TextMeshProUGUI goldText;
+    public TextMeshProUGUI speedText;
+
+    [Header("Podgląd Drużyny (Nowe)")]
+    public Image pokeImage;                  // Obrazek aktualnie wybranego Pokezaura
+    public TextMeshProUGUI slotIndexText;    // Np. "Pokezaur 1 / 3"
+    public Button setLeaderButton;           // Przycisk "Ustaw jako lidera"
+
+    [Header("Ekwipunek")]
+    public GameObject inventoryContainer;
+    public GameObject itemSlotPrefab;
+
+    public bool isMenuOpen = false;
+    private int selectedPokeIndex = 0; // Którego stworka z drużyny aktualnie oglądamy (0 - 5)
+
+    void Update()
+    {
+        string currentScene = SceneManager.GetActiveScene().name;
+        if (currentScene == "MainMenu" || currentScene == "BattleScene")
+        {
+            return;
+        }
+
+        if (PauseMenu.GameIsPaused)
+        {
+            return;
+        }
+
+        if (ShopMenu.instance != null && ShopMenu.instance.isShopOpen)
+        {
+            if (Input.GetKeyDown(KeyCode.B))
+            {
+                ShopMenu.instance.CloseShop();
+            }
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.B))
+        {
+            if (isMenuOpen)
+            {
+                CloseMenu();
+            }
+            else
+            {
+                OpenMenu();
+            }
+        }
+    }
+
+    private void Awake()
+    {
+        if (instance == null)
+        {
+            instance = this;
+        }
+    }
+
+    void OpenMenu()
+    {
+        menuPanel.SetActive(true);
+        isMenuOpen = true;
+        selectedPokeIndex = 0; // Po otwarciu domyślnie pokazujemy lidera (slot 0)
+
+        Time.timeScale = 0f;
+
+        UpdateStats();
+        UpdateInventory();
+    }
+
+    public void CloseMenu()
+    {
+        menuPanel.SetActive(false);
+        isMenuOpen = false;
+
+        Time.timeScale = 1f;
+    }
+
+    // Podepnij pod przycisk ">" (Następny Pokezaur) w oknie StatsMenu
+    public void NextPokezaur()
+    {
+        if (playerData.team.Count <= 1) return;
+        selectedPokeIndex = (selectedPokeIndex + 1) % playerData.team.Count;
+        UpdateStats();
+    }
+
+    // Podepnij pod przycisk "<" (Poprzedni Pokezaur) w oknie StatsMenu
+    public void PreviousPokezaur()
+    {
+        if (playerData.team.Count <= 1) return;
+        selectedPokeIndex--;
+        if (selectedPokeIndex < 0) selectedPokeIndex = playerData.team.Count - 1;
+        UpdateStats();
+    }
+
+    // Podepnij pod przycisk "Ustaw jako lidera" w oknie StatsMenu
+    public void SetSelectedAsLeader()
+    {
+        if (selectedPokeIndex <= 0 || selectedPokeIndex >= playerData.team.Count) return;
+
+        // Zamieniamy miejscami obecnego lidera (0) z wybranym Pokezaurem
+        Pokezaur temp = playerData.team[0];
+        playerData.team[0] = playerData.team[selectedPokeIndex];
+        playerData.team[selectedPokeIndex] = temp;
+
+        selectedPokeIndex = 0; // Teraz nasz wybrany stworek jest na pozycji 0
+        UpdateStats();
+    }
+
+    void UpdateStats()
+    {
+        if (goldText != null) goldText.text = $"{playerData.currentGold}";
+        if (speedText != null) speedText.text = $"Szybkość: {playerData.moveSpeed}";
+
+        if (playerData.team.Count > 0)
+        {
+            // Zabezpieczenie zakresu indeksu
+            if (selectedPokeIndex >= playerData.team.Count)
+                selectedPokeIndex = 0;
+
+            Pokezaur current = playerData.team[selectedPokeIndex];
+            string leaderTag = (selectedPokeIndex == 0) ? " [LIDER]" : "";
+
+            nameText.text = current.pokeName + leaderTag;
+            levelText.text = "Poziom: " + current.level;
+            hpText.text = $"HP: {current.currentHP} / {current.maxHP}";
+            xpText.text = $"XP: {current.currentXP} / {current.xpToNextLevel}";
+            AttackText.text = $"Siła: {current.damage}";
+            DefText.text = $"Obrona: {current.defense}";
+
+            if (pokeImage != null && current.sprite != null)
+            {
+                pokeImage.enabled = true;
+                pokeImage.sprite = current.sprite;
+            }
+
+            if (slotIndexText != null)
+            {
+                slotIndexText.text = $"{selectedPokeIndex + 1} / {playerData.team.Count}";
+            }
+
+            if (setLeaderButton != null)
+            {
+                // Przycisk "Ustaw jako lidera" jest aktywny tylko, gdy nie oglądamy już lidera
+                setLeaderButton.interactable = (selectedPokeIndex != 0);
+            }
+        }
+        else
+        {
+            nameText.text = "Brak Pokezaurów";
+            levelText.text = ""; hpText.text = ""; xpText.text = "";
+            AttackText.text = ""; DefText.text = "";
+            if (pokeImage != null) pokeImage.enabled = false;
+            if (slotIndexText != null) slotIndexText.text = "0 / 0";
+            if (setLeaderButton != null) setLeaderButton.interactable = false;
+        }
+    }
+
+    void UpdateInventory()
+    {
+        foreach (Transform child in inventoryContainer.transform)
+        {
+            Destroy(child.gameObject);
+        }
+
+        foreach (InventorySlot slot in playerData.inventory)
+        {
+            GameObject newSlot = Instantiate(itemSlotPrefab, inventoryContainer.transform);
+            TextMeshProUGUI[] texts = newSlot.GetComponentsInChildren<TextMeshProUGUI>();
+
+            if (texts.Length >= 1)
+            {
+                if (playerData.currentEquippedItem == slot.item)
+                {
+                    texts[0].text = slot.item.itemName + " [Założony]";
+                    texts[0].color = Color.green;
+                }
+                else
+                {
+                    texts[0].text = slot.item.itemName;
+                    texts[0].color = Color.black;
+                }
+            }
+
+            if (texts.Length >= 2) texts[1].text = "x" + slot.amount;
+
+            Button btn = newSlot.GetComponent<Button>();
+            if (btn != null)
+            {
+                btn.onClick.AddListener(() => OnItemClicked(slot.item));
+            }
+        }
+    }
+
+    void OnItemClicked(ItemData item)
+    {
+        playerData.UseItem(item);
+        UpdateStats();
+        UpdateInventory();
+    }
+}

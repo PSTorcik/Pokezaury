@@ -50,6 +50,9 @@ public class SaveManager : MonoBehaviour
     [Header("Referencje")]
     public PlayerData playerData;
 
+    [Header("Baza wszystkich gatunków (do odtwarzania grafik po LoadGame)")]
+    public List<EnemyData> allSpeciesDatabase; // Przeci¹gnij tu w Inspektorze wszystkie swoje pliki EnemyData
+
     private void Awake()
     {
         if (instance == null)
@@ -125,6 +128,16 @@ public class SaveManager : MonoBehaviour
 
             // 1. Przywracanie statystyk
             playerData.team = new List<Pokezaur>(data.team);
+            foreach (Pokezaur poke in playerData.team)
+            {
+                EnemyData species = allSpeciesDatabase.Find(e => e.enemyName == poke.pokeName);
+                if (species != null)
+                {
+                    poke.sprite = species.battleSprite;
+                    poke.backSprite = species.backSprite != null ? species.backSprite : species.battleSprite;
+                }
+            }
+
             playerData.collectedItemIDs = data.collectedItemIDs;
             playerData.currentGold = data.gold; // Wczytujemy z³oto
             playerData.moveSpeed = data.movementSpeed;

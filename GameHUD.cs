@@ -10,6 +10,7 @@ public class GameHUD : MonoBehaviour
 
     [Header("Elementy UI")]
     public GameObject hudContainer; // Ca³y panel (¿eby go ukrywaæ)
+    public Image leadPokeIcon; // Przeci¹gnij tu obiekt Image z portretem z HUD_Panel
 
     public TextMeshProUGUI levelText;
     public Slider hpSlider;
@@ -47,6 +48,12 @@ public class GameHUD : MonoBehaviour
         {
             Pokezaur leadPoke = playerData.team[0];
 
+            if (leadPokeIcon != null && leadPoke.sprite != null)
+            {
+                leadPokeIcon.enabled = true;
+                leadPokeIcon.sprite = leadPoke.sprite;
+            }
+
             if (levelText != null) levelText.text = "LVL " + leadPoke.level;
 
             if (hpSlider != null)
@@ -74,6 +81,7 @@ public class GameHUD : MonoBehaviour
             if (hpText != null) hpText.text = "0 / 0";
             if (xpSlider != null) { xpSlider.value = 0; xpSlider.maxValue = 1; }
             if (xpText != null) xpText.text = "0 / 0 XP";
+            if (leadPokeIcon != null) leadPokeIcon.enabled = false;
         }
     }
 

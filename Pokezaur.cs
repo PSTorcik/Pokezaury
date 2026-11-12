@@ -11,9 +11,10 @@ public class Pokezaur
     public int defense;
     public int currentXP;
     public int xpToNextLevel;
-    public Sprite sprite;
+    public Sprite sprite;     // Przód (ikonka w HUD, menu i dla dzikich wrogów)
+    public Sprite backSprite; // Ty³ (wyœwietlany podczas walki po stronie gracza)
 
-    // Konstruktor do ³apania
+    // Konstruktor do ³apania i odbierania startera
     public Pokezaur(EnemyData wildEnemy)
     {
         pokeName = wildEnemy.enemyName;
@@ -23,6 +24,7 @@ public class Pokezaur
         damage = wildEnemy.attackPower;
         defense = wildEnemy.defense;
         sprite = wildEnemy.battleSprite;
+        backSprite = wildEnemy.backSprite != null ? wildEnemy.backSprite : wildEnemy.battleSprite;
 
         currentXP = 0;
         xpToNextLevel = 100 * level;

@@ -38,7 +38,7 @@ public class BattleUnit : MonoBehaviour
         defense = myPokezaur.defense;
         currentHP = myPokezaur.currentHP;
 
-        mySpriteRenderer.sprite = myPokezaur.sprite;
+        mySpriteRenderer.sprite = myPokezaur.backSprite != null ? myPokezaur.backSprite : myPokezaur.sprite;
     }
 
     // Metoda zwraca 'true', jeœli jednostka umar³a
