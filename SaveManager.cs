@@ -184,6 +184,7 @@ public class SaveManager : MonoBehaviour
             }
 
             // 6. Za³adowanie sceny
+            BattleTransitionManager.isReturningFromBattle = false;
             SceneManager.LoadScene(data.currentScene);
             GameNotifications.instance.ShowMessage($"Gra wczytana", 3f);
         }

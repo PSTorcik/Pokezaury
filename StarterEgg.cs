@@ -15,6 +15,12 @@ public class StarterEgg : MonoBehaviour
 
     void Update()
     {
+        // Jeœli gracz wybra³ ju¿ swojego pierwszego Pokezaura, jajka nie powinny istnieæ po powrocie do LabScene
+        if (player.playerData != null && player.playerData.team.Count > 0)
+        {
+            Destroy(gameObject);
+            return;
+        }
         // Pancerne szukanie gracza w ka¿dej klatce, dopóki go nie znajdzie
         if (player == null)
         {
@@ -26,8 +32,6 @@ public class StarterEgg : MonoBehaviour
 
         // Obliczamy dystans. 'player.transform.position' jest w 100% bezpieczne.
         float distance = Vector2.Distance(transform.position, player.transform.position);
-        Debug.Log($"[{gameObject.name}] Dystans do gracza: {distance}");
-
 
         if (distance <= interactionDistance)
         {

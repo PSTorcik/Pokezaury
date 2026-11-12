@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Cinemachine; // Lub 'using Cinemachine;' w zale¿noœci od wersji
 
-public class AssignBoundary : MonoBehaviour
+public class AssignCameraBounds : MonoBehaviour
 {
     void Start()
     {

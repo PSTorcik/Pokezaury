@@ -207,6 +207,8 @@ public class Interactable : MonoBehaviour
 
     public void StartSpecificBattle()
     {
+        BattleTransitionManager.currentEnemyID = itemID;
+
         // 1. ZABEZPIECZENIE: Sprawdü czy przypisa≥eú wroga
         if (enemy == null)
         {

@@ -119,10 +119,8 @@ public class StatsMenu : MonoBehaviour
     {
         if (selectedPokeIndex <= 0 || selectedPokeIndex >= playerData.team.Count) return;
 
-        // Zamieniamy miejscami obecnego lidera (0) z wybranym Pokezaurem
-        Pokezaur temp = playerData.team[0];
-        playerData.team[0] = playerData.team[selectedPokeIndex];
-        playerData.team[selectedPokeIndex] = temp;
+        // Bezpieczna zamiana lidera (przek³ada te¿ za³o¿ony ekwipunek na nowego lidera)
+        playerData.SwapLeader(selectedPokeIndex);
 
         selectedPokeIndex = 0; // Teraz nasz wybrany stworek jest na pozycji 0
         UpdateStats();
@@ -215,7 +213,8 @@ public class StatsMenu : MonoBehaviour
 
     void OnItemClicked(ItemData item)
     {
-        playerData.UseItem(item);
+        // U¿ywamy przedmiotu na aktualnie przegl¹danym Pokezaurze (selectedPokeIndex)
+        playerData.UseItem(item, selectedPokeIndex);
         UpdateStats();
         UpdateInventory();
     }

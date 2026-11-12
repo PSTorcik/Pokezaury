@@ -88,7 +88,7 @@ public class PlayerData : ScriptableObject
     }
 
     // --- U¯YWANIE PRZEDMIOTÓW (NA LIDERZE DRU¯YNY) ---
-    public void UseItem(ItemData item)
+    public void UseItem(ItemData item, int targetIndex = 0)
     {
         if (team.Count == 0 && item.itemType != ItemType.Gold)
         {
@@ -96,15 +96,16 @@ public class PlayerData : ScriptableObject
             return;
         }
 
-        Pokezaur leadPoke = (team.Count > 0) ? team[0] : null;
+        if (targetIndex < 0 || targetIndex >= team.Count) targetIndex = 0;
+        Pokezaur targetPoke = (team.Count > 0) ? team[targetIndex] : null;
 
         switch (item.itemType)
         {
             case ItemType.HealHP:
             case ItemType.Consumable:
-                if (leadPoke.currentHP >= leadPoke.maxHP) return;
-                leadPoke.currentHP += item.value;
-                if (leadPoke.currentHP > leadPoke.maxHP) leadPoke.currentHP = leadPoke.maxHP;
+                if (targetPoke.currentHP >= targetPoke.maxHP) return;
+                targetPoke.currentHP += item.value;
+                if (targetPoke.currentHP > targetPoke.maxHP) targetPoke.currentHP = targetPoke.maxHP;
                 RemoveItem(item);
                 if (item.itemType == ItemType.HealHP) PlaySound(potionSound);
                 else PlaySound(consumableSound);
@@ -116,30 +117,47 @@ public class PlayerData : ScriptableObject
                 break;
 
             case ItemType.PermSTR:
-                leadPoke.damage += item.value;
+                targetPoke.damage += item.value;
                 RemoveItem(item);
                 PlaySound(potionSound);
                 break;
 
             case ItemType.PermDEF:
-                leadPoke.defense += item.value;
+                targetPoke.defense += item.value;
                 RemoveItem(item);
                 PlaySound(potionSound);
                 break;
 
             case ItemType.PermHP:
-                leadPoke.maxHP += item.value;
-                leadPoke.currentHP += item.value;
+                targetPoke.maxHP += item.value;
+                targetPoke.currentHP += item.value;
                 RemoveItem(item);
                 PlaySound(potionSound);
                 break;
 
             case ItemType.Equipment:
-                HandleEquipment(item, leadPoke);
+                // Ekwipunek zawsze zak³adamy na aktualnego lidera (team[0])
+                HandleEquipment(item, team[0]);
                 PlaySound(EQSound);
                 break;
         }
     }
+
+    public void SwapLeader(int newLeaderIndex)
+    {
+        if (newLeaderIndex <= 0 || newLeaderIndex >= team.Count) return;
+
+        // Jeœli lider ma za³o¿ony przedmiot, zdejmujemy go przed zamian¹ i zak³adamy nowemu liderowi
+        ItemData equipped = currentEquippedItem;
+        if (equipped != null) UnequipItem(team[0]);
+
+        Pokezaur temp = team[0];
+        team[0] = team[newLeaderIndex];
+        team[newLeaderIndex] = temp;
+
+        if (equipped != null) EquipItem(equipped, team[0]);
+    }
+
 
     void PlaySound(AudioClip clip)
     {
